@@ -1,13 +1,19 @@
 # HeliWidget
 EdgeTX telemetry widget for RC helicopters running Rotorflight - real-time monitoring of headspeed, battery, temperatures, governor state, and comprehensive flight statistics with audio/haptic alerts
 
+## Prerequisites
+- **EdgeTX** Tested and used on 3.0 nightlies, but should work on 2.11+ too
+- **Rotorflight** on flight controller :-)
+- **RF2 Lua Script** with `rf2bg` background task configured
+  -  Setup instructions: [Rotorflight Lua Scripts](https://github.com/rotorflight/rotorflight-lua-scripts)
+
 ## Minimum Telemetry Requirements
-Designed for Rotorflight 2.x firmware with the following minimum telemetry sensors configured:
+Designed for Rotorflight with the following minimum telemetry sensors configured:
 - Main params (Vbat, Curr, Capa, Bat%, Cel#, Vcel, Vbec)
 - ESC data (Tesc)
 - Helicopter specifics (Hspd, Gov)
 - Flight controller (ARM, ARMD, PID#, RTE#, Tmcu)
-  
+
 `set telemetry_sensors = 3,4,5,6,7,8,43,50,52,60,90,91,93,95,96,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0`
 
 ## Preview
