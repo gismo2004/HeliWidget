@@ -19,3 +19,9 @@ Designed for Rotorflight with the following minimum telemetry sensors configured
 ## Preview
 <img width="480" height="272" alt="image" src="https://github.com/user-attachments/assets/d3c12d7f-61a1-4bfc-b158-0f157e5a1cf8" />
 <img width="480" height="272" alt="image" src="https://github.com/user-attachments/assets/57338ada-7166-45f7-b91e-ea76303e206e" />
+
+## Support & Disclaimer
+- This is a personal hobby project shared freely with the community
+- Provided as-is without warranty or guaranteed support
+- Issues and pull requests are welcome but may not be addressed promptly
+- **Use at your own risk** - always maintain visual line of sight and verify critical telemetry data
