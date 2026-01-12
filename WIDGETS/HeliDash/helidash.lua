@@ -444,6 +444,8 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
     local row_h_last = available_h - row_h * 2 -- Last row gets remaining pixels
     local col_w = (c_w - 2 * padding) / 5 -- 5 columns: label + 4 values
     local col_start_y = header_h + header_spacing
+    -- Dynamic font selection for min/max labels based on available row height
+    local minMaxFont = selectFontByHeight(row_h, {"STDSIZE", "SMLSIZE", "TINSIZE"})
 
     container:build({
         {
@@ -546,7 +548,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h,
                     text = wgt.values.esc_temp_min_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -556,7 +558,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h,
                     text = wgt.values.vcel_min_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -566,7 +568,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h,
                     text = wgt.values.vbec_min_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -576,7 +578,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w - padding,
                     h = row_h,
                     text = wgt.values.curr_min_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, -- Max row (uses row_h_last to consume remaining pixels)
@@ -597,7 +599,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h_last,
                     text = wgt.values.esc_temp_max_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -607,7 +609,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h_last,
                     text = wgt.values.vcel_max_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -617,7 +619,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w,
                     h = row_h_last,
                     text = wgt.values.vbec_max_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }, {
@@ -627,7 +629,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
                     w = col_w - padding,
                     h = row_h_last,
                     text = wgt.values.curr_max_formatted,
-                    font = headerFont,
+                    font = minMaxFont,
                     color = COLOR_THEME_PRIMARY1,
                     align = CENTER
                 }
