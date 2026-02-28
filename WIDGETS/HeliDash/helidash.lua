@@ -164,16 +164,25 @@ function buildBarElement(parentBox, wgt, params, getPercent, getPercentColor)
     return box
 end
 
--- Helper function to measure actual text height for a given font
-local function measureFontHeight(fontConst)
-    local w, h = lcd.sizeText("X", fontConst)
+-- Helper function to measure font dimensions (height and optionally width)
+-- Optional: pass maxWidth and testString to also validate width constraint
+local function measureFont(fontConst, maxWidth, testString)
+    local testText = testString or "X"
+    local w, h = lcd.sizeText(testText, fontConst)
+
+    -- If width constraint provided, return -1 if text is too wide
+    if maxWidth and w > maxWidth then
+        return -1
+    end
+
     return h
 end
 
--- Dynamic font selector: Choose appropriate font based on available height
+-- Dynamic font selector: Choose appropriate font based on available dimensions
 -- Returns the actual font constant (SMLSIZE, DBLSIZE, etc.), not a string
 -- Allow reasonable tolerance for font height measurement variance
-local function selectFontByHeight(availableHeight, preferredOrder)
+-- Optional: pass availableWidth, testString, and preferredOrder for width validation and font preference
+local function selectFont(availableHeight, availableWidth, testString, preferredOrder)
     local defaultOrder = {"XXLSIZE", "DBLSIZE", "MIDSIZE", "STDSIZE", "SMLSIZE", "TINSIZE"}
     preferredOrder = preferredOrder or defaultOrder
     local FONT_TOLERANCE = 2 -- Allow up to 2 pixels of overshoot
@@ -182,8 +191,8 @@ local function selectFontByHeight(availableHeight, preferredOrder)
         local fontName = preferredOrder[i]
         local fontConst = FontConstants[fontName]
         if fontConst then
-            local fontHeight = measureFontHeight(fontConst)
-            if fontHeight <= availableHeight + FONT_TOLERANCE then
+            local fontHeight = measureFont(fontConst, availableWidth, testString)
+            if fontHeight > 0 and fontHeight <= availableHeight + FONT_TOLERANCE then
                 return fontConst
             end
         end
@@ -211,8 +220,8 @@ local function buildBatteryUsedElement(container, wgt, x, y, c_w, c_h)
 
     -- Pick mid label font based on space available minus padding to bar
     local available_for_mid = c_h - bar_h
-    local mid_label_font = selectFontByHeight(available_for_mid, {"DBLSIZE", "MIDSIZE", "SMLSIZE"})
-    local mid_label_h = measureFontHeight(mid_label_font)
+    local mid_label_font = selectFont(available_for_mid, nil, nil, {"DBLSIZE", "MIDSIZE", "SMLSIZE"})
+    local mid_label_h = measureFont(mid_label_font)
 
     local label_y = header_h
     local label_mid_y = bar_y - mid_label_h
@@ -278,8 +287,8 @@ end
 local function buildESCTempElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -318,8 +327,8 @@ end
 local function buildBatteryVoltageElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -359,8 +368,11 @@ end
 local function buildTimerElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local availableWidth = c_w - 2 * padding
+    -- Use "-00:00" as test string (widest possible timer display with negative sign)
+    local valueFont = selectFont(availableHeight, availableWidth, "-00:00", nil)
+    heliDashFunctions.log("Selected timer font with height: " .. measureFont(valueFont))
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -399,8 +411,9 @@ end
 local function buildCapacityUsedValueElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local availableWidth = c_w - 2 * padding
+    local valueFont = selectFont(availableHeight, availableWidth, "9999")
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -445,7 +458,7 @@ local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
     local col_w = (c_w - 2 * padding) / 5 -- 5 columns: label + 4 values
     local col_start_y = header_h + header_spacing
     -- Dynamic font selection for min/max labels based on available row height
-    local minMaxFont = selectFontByHeight(row_h, {"STDSIZE", "SMLSIZE", "TINSIZE"})
+    local minMaxFont = selectFont(row_h, nil, nil, {"STDSIZE", "SMLSIZE", "TINSIZE"})
 
     container:build({
         {
@@ -642,8 +655,8 @@ end
 local function buildHeadspeedElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -682,8 +695,8 @@ end
 local function buildBECVoltageElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -722,8 +735,8 @@ end
 local function buildCurrentValueElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -762,8 +775,8 @@ local function buildRateProfileElement(container, wgt, x, y, c_w, c_h)
     local rect_w = math.floor(c_w / 2)
     local rect_h = c_h
     local availableHeight = rect_h - header_h
-    local valueFont = selectFontByHeight(availableHeight)
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight)
+    local valueFontHeight = measureFont(valueFont)
 
     -- Profile rectangle (left)
     local padding = 2
@@ -839,8 +852,8 @@ end
 local function buildArmStateElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight, {"MIDSIZE", "STDSIZE"})
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight, nil, nil, {"MIDSIZE", "STDSIZE"})
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -879,8 +892,8 @@ end
 local function buildGovernorElement(container, wgt, x, y, c_w, c_h)
     local padding = 2
     local availableHeight = c_h - header_h
-    local valueFont = selectFontByHeight(availableHeight, {"STDSIZE", "SMLSIZE", "TINSIZE"})
-    local valueFontHeight = measureFontHeight(valueFont)
+    local valueFont = selectFont(availableHeight, nil, nil, {"STDSIZE", "SMLSIZE", "TINSIZE"})
+    local valueFontHeight = measureFont(valueFont)
     container:build({
         {
             type = "rectangle",
@@ -923,40 +936,43 @@ end
 -- Status bar builder: Normal telemetry display (TPWR, RQly, Tmcu, TX Battery)
 local function buildStatusBarNormalElement(container, wgt, x, y, c_w, c_h)
     local item_w = math.floor(c_w / 4)
+    -- Calculate vertical centering offset
+    local headerFontHeight = measureFont(headerFont)
+    local y_offset = math.floor((c_h - headerFontHeight) / 2)
     local labels = {}
 
     labels[1] = container:label({
         x = x,
-        y = y,
+        y = y + y_offset,
         w = item_w,
-        h = c_h,
+        h = headerFontHeight,
         text = function() return string.format("%s: %s", wgt.values.label_tpwr, wgt.values.tpwr_formatted()) end,
         font = headerFont,
         color = COLOR_THEME_PRIMARY1
     })
     labels[2] = container:label({
         x = x + item_w,
-        y = y,
+        y = y + y_offset,
         w = item_w,
-        h = c_h,
+        h = headerFontHeight,
         text = function() return string.format("%s: %s", wgt.values.label_rqly, wgt.values.rqly_formatted()) end,
         font = headerFont,
         color = COLOR_THEME_PRIMARY1
     })
     labels[3] = container:label({
         x = x + 2 * item_w,
-        y = y,
+        y = y + y_offset,
         w = item_w,
-        h = c_h,
+        h = headerFontHeight,
         text = function() return string.format("%s: %s", wgt.values.label_mcu_temp_max, wgt.values.mcu_temp_max_formatted()) end,
         font = headerFont,
         color = COLOR_THEME_PRIMARY1
     })
     labels[4] = container:label({
         x = x + 3 * item_w,
-        y = y,
+        y = y + y_offset,
         w = item_w,
-        h = c_h,
+        h = headerFontHeight,
         text = function() return string.format("%s: %s", wgt.values.label_tx_batt, wgt.values.vtx_volts_formatted()) end,
         font = headerFont,
         color = function() return wgt.values.vtx_volts_color or COLOR_THEME_PRIMARY1 end
@@ -967,11 +983,15 @@ end
 
 -- Element builder: Status bar - Arming flags display (full width)
 local function buildStatusBarFlagsElement(container, wgt, x, y, c_w, c_h)
+    -- Calculate vertical centering offset
+    local headerFontHeight = measureFont(headerFont)
+    local y_offset = math.floor((c_h - headerFontHeight) / 2)
+
     return container:label({
         x = x,
-        y = y,
+        y = y + y_offset,
         w = c_w,
-        h = c_h,
+        h = headerFontHeight,
         text = function() return wgt.values.arm_flags_text_formatted or "Arming Disabled" end,
         font = headerFont,
         color = COLOR_THEME_WARNING
@@ -1020,8 +1040,8 @@ local function build_ui(wgt, zone)
     local h_status = math.floor(h * 0.075) -- Status bar height (7%)
 
     -- Dynamic header font based on available space (status bar is smallest constraint)
-    headerFont = selectFontByHeight(h_status, {"SMLSIZE", "TINSIZE"})
-    header_h = measureFontHeight(headerFont)
+    headerFont = selectFont(h_status, nil, nil, {"SMLSIZE", "TINSIZE"})
+    header_h = measureFont(headerFont)
 
     local h_top = math.floor((h - h_status - 2 * line_h) * 0.45) -- Top row height (~45%)
     local h_mid = h - h_top - h_status - 2 * line_h -- Middle row gets remaining space (guaranteed to sum correctly)

@@ -307,6 +307,10 @@ end
 
 function heliDashFunctions.updateBatteryCallout(wgt)
     if not wgt.is_connected then return end
+    if not isArmed() then
+        wgt.battery_low_start_time = nil
+        return
+    end
 
     -- Update capacity data first (needed for callout logic)
     heliDashFunctions.updateMAUsed(wgt)
@@ -334,7 +338,7 @@ function heliDashFunctions.updateBatteryCallout(wgt)
             wgt.battery_low_start_time = nil
         end
 
-        -- Mode 2: No current sensor (% = 100) - announce voltage when critically low for 2+ seconds
+    -- Mode 2: No current sensor (% = 100) - announce voltage when critically low for 2+ seconds
     elseif wgt.values.capa_percent >= 100 then
         local vcel = wgt.values.vcel or 0
         local voltage_threshold = 3.3
@@ -423,6 +427,7 @@ function heliDashFunctions.refreshUI(wgt)
     heliDashFunctions.updateCell(wgt)
     heliDashFunctions.updateVcel(wgt)
     heliDashFunctions.updateCurr(wgt)
+    heliDashFunctions.updateMAUsed(wgt)
     heliDashFunctions.updateGovState(wgt)
     heliDashFunctions.updateProfiles(wgt)
     heliDashFunctions.updateLinkQuality(wgt)
