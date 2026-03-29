@@ -7,6 +7,7 @@ local header_h = 0
 local headerFontColour = COLOR_THEME_SECONDARY1
 
 -- Map font names (strings) to EdgeTx constants for use in labels
+-- XLSIZE is conditionally available (added in EdgeTX with PR #7150)
 local FontConstants = {
     TINSIZE = TINSIZE,
     SMLSIZE = SMLSIZE,
@@ -15,6 +16,13 @@ local FontConstants = {
     DBLSIZE = DBLSIZE,
     XXLSIZE = XXLSIZE
 }
+
+-- Safely add XLSIZE if available (EdgeTX 3.0+)
+-- Use type check to ensure XLSIZE is properly defined as a number
+local hasXLSIZE = (type(XLSIZE) == "number")
+if hasXLSIZE then
+    FontConstants.XLSIZE = XLSIZE
+end
 
 
 local wgt = {is_connected = false, rssi_state = false, rssi_state_change_time = 0, rssi_debounce_threshold = 5}
@@ -183,7 +191,13 @@ end
 -- Allow reasonable tolerance for font height measurement variance
 -- Optional: pass availableWidth, testString, and preferredOrder for width validation and font preference
 local function selectFont(availableHeight, availableWidth, testString, preferredOrder)
+    -- Build default order: include XLSIZE only if available
     local defaultOrder = {"XXLSIZE", "DBLSIZE", "MIDSIZE", "STDSIZE", "SMLSIZE", "TINSIZE"}
+    if hasXLSIZE then
+        -- Insert XLSIZE between DBLSIZE and XXLSIZE for optimal scaling
+        table.insert(defaultOrder, 2, "XLSIZE")
+    end
+
     preferredOrder = preferredOrder or defaultOrder
     local FONT_TOLERANCE = 2 -- Allow up to 2 pixels of overshoot
 
@@ -345,7 +359,6 @@ local function buildBatteryVoltageElement(container, wgt, x, y, c_w, c_h)
                     y = 0,
                     w = c_w - padding,
                     h = header_h,
-                    thickness = 1,
                     text = wgt.values.label_battery_voltage,
                     font = headerFont,
                     color = headerFontColour
