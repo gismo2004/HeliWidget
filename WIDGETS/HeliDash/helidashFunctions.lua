@@ -19,14 +19,14 @@
 -- set telemetry_sensors = 3,4,5,6,7,8,43,50,52,60,90,91,93,95,96,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
 
 
-local heliDashFunctions = {}
+local helidash_functions = {}
 
 -- ============================================================================
 -- LOCAL HELPER FUNCTIONS
 -- ============================================================================
 
 -- Logging helper with ms prefix and configurable tag
-function heliDashFunctions.log(text, ...)
+function helidash_functions.log(text, ...)
     if not text then return end
     local t = getTime() or 0 -- EdgeTX ticks are centiseconds
     local ms = t * 10        -- convert cs to ms
@@ -37,93 +37,186 @@ function heliDashFunctions.log(text, ...)
 end
 
 -- Detect simulator mode for testing
-heliDashFunctions.simuMode = string.sub(select(2, getVersion()), -4) == "simu"
-heliDashFunctions.log("simuMode=%s", tostring(heliDashFunctions.simuMode))
+helidash_functions.simu_mode = string.sub(select(2, getVersion()), -4) == "simu"
+helidash_functions.log("simu_mode=%s", tostring(helidash_functions.simu_mode))
 
-local function formatTime(t1)
+local function format_time(t1)
     if not t1 or t1.value == nil then return "00:00", false end
 
     local seconds = math.abs(t1.value)
-    local isNegative = t1.value < 0
+    local is_negative = t1.value < 0
 
     local mm = math.floor(seconds / 60) % 60
     local ss = math.floor(seconds % 60)
 
     local time_str = string.format("%02d:%02d", mm, ss)
 
-    if isNegative then time_str = '-' .. time_str end
-    return time_str, isNegative
+    if is_negative then time_str = '-' .. time_str end
+    return time_str, is_negative
 end
 
-local function isArmed()
-    local flags = getSourceValue("ARM")
-    if flags == nil then return false end
-    return bit32.band(flags, 0x01) == 1
+local function format_elapsed_time(elapsed_centiseconds)
+    local seconds = math.floor(math.max(0, elapsed_centiseconds or 0) / 100)
+    return format_time({ value = seconds })
 end
 
-local function armingDisableFlagsList(flags)
-    if flags == nil then return nil end
+local function is_rf_connected(wgt)
+    return wgt.values.rf_connection_state ~= "disconnected"
+end
 
-    local flagNames = {
-        [0] = "No Gyro",
-        [1] = "Fail Safe",
-        [2] = "RX Fail Safe",
-        [3] = "Bad RX Recovery",
-        [4] = "Box Fail Safe",
-        [5] = "Governor",
-        [6] = "RPM Signal",
-        [7] = "Throttle",
-        [8] = "Angle",
-        [9] = "Boot Grace Time",
-        [10] = "No Pre Arm",
-        [11] = "Load",
-        [12] = "Calibrating",
-        [13] = "CLI",
-        [14] = "CMS Menu",
-        [15] = "BST",
-        [16] = "MSP",
-        [17] = "Paralyze",
-        [18] = "GPS",
-        [19] = "Resc",
-        [20] = "RPM Filter",
-        [21] = "Reboot Required",
-        [22] = "DSHOT Bitbang",
-        [23] = "Acc Calibration",
-        [24] = "Motor Protocol",
-        [25] = "Arm Switch"
-    }
+local function is_craft_armed(wgt)
+    return wgt.values.rf_connection_state == "armed"
+end
 
-    local result = {}
-    for i = 0, 25 do if bit32.band(flags, bit32.lshift(1, i)) ~= 0 then table.insert(result, flagNames[i]) end end
-    return result
+local function should_track_governor_run_extrema(wgt)
+    return wgt.values.gov_state ~= nil and wgt.values.gov_state > 2 and wgt.values.gov_state ~= 5
+end
+
+local function should_track_flight_time(wgt)
+    return is_rf_connected(wgt) and should_track_governor_run_extrema(wgt)
+end
+
+local function reset_flight_time(wgt)
+    wgt.flight_time_elapsed = 0
+    wgt.flight_time_last_tick = nil
+    wgt.last_model_timer_value = nil
+    wgt.values.flight_time_str = "00:00"
+end
+
+local function update_tracked_extrema(wgt, value_key, min_key, max_key)
+    local current_value = wgt.values[value_key]
+    if current_value == nil then return end
+
+    if wgt.values[min_key] == nil or current_value < wgt.values[min_key] then
+        wgt.values[min_key] = current_value
+    end
+    if wgt.values[max_key] == nil or current_value > wgt.values[max_key] then
+        wgt.values[max_key] = current_value
+    end
+end
+
+local function get_battery_percent_text_color(percent, warning_percent)
+    if percent == nil then return COLOR_THEME_PRIMARY1 end
+
+    if not lcd or not lcd.RGB then
+        return percent <= warning_percent and COLOR_THEME_WARNING or DARKGREEN
+    end
+
+    local clamped_percent = math.max(0, math.min(100, percent or 0))
+    local clamped_warning = math.max(0, math.min(99, warning_percent or 30))
+    if clamped_percent <= clamped_warning then
+        return lcd.RGB(0xff, 0, 0)
+    end
+
+    local normalized = (clamped_percent - clamped_warning) / math.max(1, 100 - clamped_warning)
+    if normalized < 0.5 then
+        local green = math.floor(0xff * (normalized / 0.5))
+        return lcd.RGB(0xff, green, 0)
+    end
+
+    local red = math.floor(0xff * (1 - ((normalized - 0.5) / 0.5)))
+    return lcd.RGB(red, 0xff, 0)
+end
+
+local function clear_live_telemetry_values(wgt)
+    wgt.values.vbat = nil
+    wgt.values.vbat_min = nil
+    wgt.values.vbat_max = nil
+    wgt.values.vcel = nil
+    wgt.values.vcel_min = nil
+    wgt.values.vcel_max = nil
+    wgt.values.cel_count = nil
+    wgt.values.curr = nil
+    wgt.values.curr_min = nil
+    wgt.values.curr_max = nil
+    wgt.values.capa = nil
+    wgt.values.capa_percent = nil
+    wgt.values.headspeed = nil
+    wgt.values.headspeed_min = nil
+    wgt.values.headspeed_max = nil
+    wgt.values.vbec = nil
+    wgt.values.vbec_min = nil
+    wgt.values.vbec_max = nil
+    wgt.values.esc_temp = nil
+    wgt.values.esc_temp_min = nil
+    wgt.values.esc_temp_max = nil
+    wgt.values.gov_state = nil
+    wgt.values.arm_disable_flags = nil
+    wgt.values.profile_id = nil
+    wgt.values.rate_id = nil
+    wgt.values.rf_battery_profile = nil
+    wgt.values.rf_battery_capacity_mah = nil
+    wgt.values.rf_battery_cell_count = nil
+    wgt.values.rqly_min = nil
+    wgt.values.tpwr_max = nil
+    wgt.values.mcu_temp_max = nil
+    wgt.values.vtx_volts = nil
+    wgt.values.vtx_volts_percent = nil
 end
 
 -- ============================================================================
 -- GENERAL INFO UPDATES
 -- ============================================================================
-function heliDashFunctions.updateCraftName(wgt) wgt.values.craft_name = string.gsub(model.getInfo().name, "^>", "") end
-
-function heliDashFunctions.updateTimerCount(wgt)
-    local t1 = model.getTimer(wgt.options.Timer or 0)
-    local time_str, isNegative = formatTime(t1)
-    wgt.values.timer_str = time_str
-    wgt.values.timer_is_negative = isNegative
+function helidash_functions.update_craft_name(wgt)
+    local model_name = rf2 and rf2.modelName
+    if not model_name then
+        local model_info = model.getInfo()
+        model_name = model_info and model_info.name
+    end
+    wgt.values.craft_name = string.gsub(model_name or "Unknown", "^>", "")
 end
 
-function heliDashFunctions.updateProfiles(wgt)
-    wgt.values.profile_id = getSourceValue("PID#") or -1
-    wgt.values.rate_id = getSourceValue("RTE#") or -1
+function helidash_functions.update_timer_count(wgt)
+    local t1 = model.getTimer(wgt.options.Timer or 0)
+    local timer_value = t1 and t1.value
+    local timer_start = t1 and t1.start
+    local timer_text, is_negative = format_time(t1)
+
+    wgt.values.timer_str = timer_text
+    wgt.values.timer_is_negative = is_negative
+
+    if timer_value ~= nil and timer_start ~= nil and wgt.last_model_timer_value ~= nil and timer_value == timer_start and wgt.last_model_timer_value ~= timer_start then
+        reset_flight_time(wgt)
+    end
+    wgt.last_model_timer_value = timer_value
+
+    local now = getTime() or 0
+    if should_track_flight_time(wgt) then
+        if wgt.flight_time_last_tick ~= nil and now > wgt.flight_time_last_tick then
+            wgt.flight_time_elapsed = (wgt.flight_time_elapsed or 0) + (now - wgt.flight_time_last_tick)
+        end
+        wgt.flight_time_last_tick = now
+    else
+        wgt.flight_time_last_tick = nil
+    end
+
+    wgt.values.flight_time_str = format_elapsed_time(wgt.flight_time_elapsed or 0)
+end
+
+function helidash_functions.update_profiles(wgt)
+    wgt.values.profile_id = getSourceValue("PID#")
+    wgt.values.rate_id = getSourceValue("RTE#")
+    wgt.values.rf_battery_profile = getSourceValue("BAT#")
+    if wgt.sync_active_battery_capacity then
+        wgt.sync_active_battery_capacity(wgt)
+    end
 end
 
 -- ============================================================================
 -- TRANSMITTER/RADIO UPDATES
 -- ============================================================================
 
-function heliDashFunctions.updateTXBatVoltage(wgt)
-    wgt.values.vtx_volts = getSourceValue("tx-voltage") or 0
+function helidash_functions.update_tx_bat_voltage(wgt)
+    wgt.values.vtx_volts = getSourceValue("tx-voltage")
     wgt.values.vtx_volts_max = getGeneralSettings().battMax
     wgt.values.vtx_volts_min = getGeneralSettings().battMin
     wgt.values.vtx_volts_warn = getGeneralSettings().battWarn
+
+    if wgt.values.vtx_volts == nil then
+        wgt.values.vtx_volts_percent = nil
+        wgt.values.vtx_volts_color = COLOR_THEME_PRIMARY1
+        return
+    end
 
     wgt.values.vtx_volts_percent = math.floor(100 -
         (100 * (wgt.values.vtx_volts_max - wgt.values.vtx_volts) //
@@ -131,106 +224,113 @@ function heliDashFunctions.updateTXBatVoltage(wgt)
 
     if wgt.values.vtx_volts_percent > 100 then wgt.values.vtx_volts_percent = 100 end
 
-    local warnPercent = math.ceil(100 -
+    local warn_percent = math.ceil(100 -
         (100 * (wgt.values.vtx_volts_max - wgt.values.vtx_volts_warn) //
             (wgt.values.vtx_volts_max - wgt.values.vtx_volts_min)))
 
-    if (wgt.values.vtx_volts_percent < warnPercent) then
+    if (wgt.values.vtx_volts_percent < warn_percent) then
         wgt.values.vtx_volts_color = COLOR_THEME_WARNING
     else
         wgt.values.vtx_volts_color = COLOR_THEME_PRIMARY1
     end
 end
 
-function heliDashFunctions.updateLinkQuality(wgt)
+function helidash_functions.update_link_quality(wgt)
     -- Only track minimum link quality; current value not needed
-    wgt.values.rqly_min = getSourceValue("RQly-") or 0
+    wgt.values.rqly_min = getSourceValue("RQly-")
 end
 
-function heliDashFunctions.updateTransmitterPower(wgt)
+function helidash_functions.update_transmitter_power(wgt)
     -- Only track maximum transmitter power; current value not needed
-    wgt.values.tpwr_max = getValue("TPWR+") or 0
+    wgt.values.tpwr_max = getValue("TPWR+")
 end
 
 -- ============================================================================
 -- AIRCRAFT TELEMETRY: VOLTAGE & TEMPERATURE
 -- ============================================================================
-function heliDashFunctions.updateCell(wgt)
-    wgt.values.vbat = getSourceValue("Vbat") or 0
+function helidash_functions.update_cell(wgt)
+    wgt.values.vbat = getSourceValue("Vbat")
+    wgt.values.vbat_min = getSourceValue("Vbat-")
+    wgt.values.vbat_max = getSourceValue("Vbat+")
 
-    if heliDashFunctions.simuMode then wgt.values.vbat = math.random(11.01, 12.01) end
+    if helidash_functions.simu_mode then
+        wgt.values.vbat = math.random(1101, 1201) / 100
+        wgt.values.vbat_min = 10.80
+        wgt.values.vbat_max = 12.30
+    end
 end
 
-function heliDashFunctions.updateVcel(wgt)
-    wgt.values.vcel = getSourceValue("Vcel") or 0
-    wgt.values.vcel_min = getSourceValue("Vcel-") or 0
-    wgt.values.vcel_max = getSourceValue("Vcel+") or 0
-    wgt.values.cel_count = getSourceValue("Cel#") or 0
+function helidash_functions.update_vcel(wgt)
+    wgt.values.vcel = getSourceValue("Vcel")
+    wgt.values.vcel_min = getSourceValue("Vcel-")
+    wgt.values.vcel_max = getSourceValue("Vcel+")
+    wgt.values.cel_count = getSourceValue("Cel#")
 
-    if heliDashFunctions.simuMode then
+    if helidash_functions.simu_mode then
         wgt.values.vcel = 3.2
         wgt.values.vcel_max = 4.2
-        wgt.values.vcel_min = 3.5
+        wgt.values.vcel_min = 3.1
         wgt.values.cel_count = 2
     end
 end
 
-function heliDashFunctions.updateVbec(wgt)
-    wgt.values.vbec = getSourceValue("Vbec") or 0
-    wgt.values.vbec_max = getSourceValue("Vbec+") or 0
-    wgt.values.vbec_min = getSourceValue("Vbec-") or 0
+function helidash_functions.update_vbec(wgt)
+    wgt.values.vbec = getSourceValue("Vbec")
+    wgt.values.vbec_max = getSourceValue("Vbec+")
+    wgt.values.vbec_min = getSourceValue("Vbec-")
 
-    if heliDashFunctions.simuMode then
+    if helidash_functions.simu_mode then
         wgt.values.vbec = math.random(72, 78) / 10
         wgt.values.vbec_max = 8.4
         wgt.values.vbec_min = 7.2
     end
 end
 
-function heliDashFunctions.updateESCTemperature(wgt)
-    wgt.values.esc_temp = getSourceValue("Tesc") or 0
-    wgt.values.esc_temp_min = getSourceValue("Tesc-") or 0
-    wgt.values.esc_temp_max = getSourceValue("Tesc+") or 0
+function helidash_functions.update_esc_temperature(wgt)
+    wgt.values.esc_temp = getSourceValue("Tesc")
+    wgt.values.esc_temp_min = getSourceValue("Tesc-")
+    wgt.values.esc_temp_max = getSourceValue("Tesc+")
 
-    if heliDashFunctions.simuMode then
+    if helidash_functions.simu_mode then
         wgt.values.esc_temp = 60
         wgt.values.esc_temp_max = 75
         wgt.values.esc_temp_min = 45
     end
 end
 
-function heliDashFunctions.updateMCUTemperature(wgt) wgt.values.mcu_temp_max = getSourceValue("Tmcu+") or 0 end
+function helidash_functions.update_mcu_temperature(wgt) wgt.values.mcu_temp_max = getSourceValue("Tmcu+") end
 
 -- ============================================================================
 -- AIRCRAFT TELEMETRY: CURRENT & CAPACITY
 -- ============================================================================
-function heliDashFunctions.updateCurr(wgt)
-    wgt.values.curr = getSourceValue("Curr") or 0
-    wgt.values.curr_min = getSourceValue("Curr-") or 0
-    wgt.values.curr_max = getSourceValue("Curr+") or 0
+function helidash_functions.update_curr(wgt)
+    wgt.values.curr = getSourceValue("Curr")
 
-    if heliDashFunctions.simuMode then
+    if helidash_functions.simu_mode then
         wgt.values.curr = math.random(0, 200)
-        wgt.values.curr_max = 255
-        wgt.values.curr_min = 0.2
+    end
+
+    if should_track_governor_run_extrema(wgt) then
+        update_tracked_extrema(wgt, "curr", "curr_min", "curr_max")
     end
 end
 
-function heliDashFunctions.updateMAUsed(wgt)
-    wgt.values.capa = getSourceValue("Capa") or 0
-    wgt.values.capa_percent = getSourceValue("Bat%") or 100
+function helidash_functions.update_ma_used(wgt)
+    wgt.values.capa = getSourceValue("Capa")
+    wgt.values.capa_percent = getSourceValue("Bat%")
 
-    if heliDashFunctions.simuMode then
+    if helidash_functions.simu_mode then
         wgt.values.capa = math.random(0, 2000)
         wgt.values.capa_percent = math.random(0, 100)
     end
 
-    local batt_cap_min = (wgt.options and wgt.options.FuelMin) or 30
-    if wgt.values.capa_percent > batt_cap_min then
-        wgt.values.capa_mid_text_color = COLOR_THEME_PRIMARY1
+    local batt_cap_min = wgt.options.FuelMin or 30
+    wgt.values.capa_mid_text_color = get_battery_percent_text_color(wgt.values.capa_percent, batt_cap_min)
+    if wgt.values.capa_percent == nil then
+        wgt.values.capa_cell_color = COLOR_THEME_PRIMARY1
+    elseif wgt.values.capa_percent > batt_cap_min then
         wgt.values.capa_cell_color = COLOR_THEME_SECONDARY2
     else
-        wgt.values.capa_mid_text_color = COLOR_THEME_WARNING
         wgt.values.capa_cell_color = COLOR_THEME_WARNING
     end
 end
@@ -238,85 +338,59 @@ end
 -- ============================================================================
 -- AIRCRAFT TELEMETRY: HELI-SPECIFIC
 -- ============================================================================
-function heliDashFunctions.updateHeadspeed(wgt)
-    wgt.values.headspeed = getSourceValue("Hspd") or 0
-    if heliDashFunctions.simuMode then wgt.values.headspeed = math.random(2000, 3000) end
+function helidash_functions.update_headspeed(wgt)
+    wgt.values.headspeed = getSourceValue("Hspd")
+
+    if helidash_functions.simu_mode then
+        wgt.values.headspeed = math.random(2000, 3000)
+    end
+
+    if should_track_governor_run_extrema(wgt) then
+        update_tracked_extrema(wgt, "headspeed", "headspeed_min", "headspeed_max")
+    end
 end
 
-function heliDashFunctions.updateGovState(wgt)
-    local gov_state = getSourceValue("Gov") or 0
-
-    if heliDashFunctions.simuMode then gov_state = math.random(0, 9) end
-
-    local govStates = {
-        [0] = "Throttle off",  -- GOV_STATE_THROTTLE_OFF
-        [1] = "Throttle Idle", -- GOV_STATE_THROTTLE_IDLE
-        [2] = "Spooling up",   -- GOV_STATE_SPOOLUP
-        [3] = "Recovery",      -- GOV_STATE_RECOVERY
-        [4] = "Gov. Active",   -- GOV_STATE_ACTIVE
-        [5] = "Throttle Hold", -- GOV_STATE_THROTTLE_HOLD
-        [6] = "Gov. Fallback", -- GOV_STATE_FALLBACK
-        [7] = "Autorotation",  -- GOV_STATE_AUTOROTATION
-        [8] = "Bailing Out"    -- GOV_STATE_BAILOUT
-    }
-
-    wgt.values.gov_state = govStates[gov_state] or "Gov. Disabled"
+function helidash_functions.update_gov_state(wgt)
+    wgt.values.gov_state = getSourceValue("Gov")
+    if helidash_functions.simu_mode then wgt.values.gov_state = math.random(0, 9) end
 end
 
 -- ============================================================================
 -- ARM STATE UPDATES
 -- ============================================================================
 
-function heliDashFunctions.updateArm(wgt)
-    wgt.values.arm_state = isArmed()
-    local flags = getSourceValue("ARMD")
-    if flags == nil then flags = 0 end
-    local flagList = armingDisableFlagsList(flags)
-    wgt.values.arm_disable_flags_list = flagList
+function helidash_functions.update_arm(wgt)
+    wgt.values.arm_disable_flags = getSourceValue("ARMD")
 end
 
--- Update arming flags display (cycles every 2 seconds if multiple flags)
-function heliDashFunctions.updateArmingFlagsDisplay(wgt)
-    if not wgt.values.arm_disable_flags_list or #wgt.values.arm_disable_flags_list == 0 then
-        wgt.values.arm_flags_text_formatted = ""
+function helidash_functions.on_telemetry_state_changed(wgt, previous_state, new_state)
+    if previous_state == "disconnected" and new_state ~= "disconnected" then
+        clear_live_telemetry_values(wgt)
+        helidash_functions.reset_telemetry_stats(wgt)
         return
     end
 
-    -- Initialize cycling state if needed
-    if not wgt.flag_cycle_time then wgt.flag_cycle_time = getTime() end
-    if not wgt.flag_cycle_index then wgt.flag_cycle_index = 0 end
-
-    local flags = wgt.values.arm_disable_flags_list
-    local cycle_interval = 200 -- 2 seconds in centiseconds
-    local now = getTime()
-    local elapsed = now - wgt.flag_cycle_time
-
-    -- Cycle to next flag every 2 seconds
-    if elapsed >= cycle_interval then
-        wgt.flag_cycle_index = (wgt.flag_cycle_index + 1) % #flags
-        wgt.flag_cycle_time = now
+    if previous_state ~= "disconnected" and new_state == "disconnected" then
+        helidash_functions.log("Connection lost")
     end
-
-    local current_flag = flags[wgt.flag_cycle_index + 1]
-    wgt.values.arm_flags_text_formatted = "Arming Disabled: " .. (current_flag or "")
 end
 
 -- ============================================================================
 -- ALERTS & CALLOUTS
 -- ============================================================================
 
-function heliDashFunctions.updateBatteryCallout(wgt)
-    if not wgt.is_connected then return end
-    if not isArmed() then
+function helidash_functions.update_battery_callout(wgt)
+    if not is_rf_connected(wgt) then return end
+    if not is_craft_armed(wgt) then
         wgt.battery_low_start_time = nil
         return
     end
 
     -- Update capacity data first (needed for callout logic)
-    heliDashFunctions.updateMAUsed(wgt)
+    helidash_functions.update_ma_used(wgt)
 
     local batt_cap_min = wgt.options.FuelMin or 30
-    local callout_interval = wgt.options.CalloutInt or 10
+    local callout_interval = math.max(1, wgt.options.CalloutInt or 10)
     local now = getTime() / 100
     wgt.last_battery_callout_time = wgt.last_battery_callout_time or 0
 
@@ -324,7 +398,7 @@ function heliDashFunctions.updateBatteryCallout(wgt)
     local announce_value, announce_unit, announce_precision, log_msg
 
     -- Mode 1: Current sensor detected (% < 100) - announce percentage when low (with 2+ sec debounce)
-    if wgt.values.capa_percent < 100 then
+    if wgt.values.capa_percent ~= nil and wgt.values.capa_percent < 100 then
         if wgt.values.capa_percent <= batt_cap_min then
             wgt.battery_low_start_time = wgt.battery_low_start_time or now
             local low_duration = now - wgt.battery_low_start_time
@@ -338,12 +412,12 @@ function heliDashFunctions.updateBatteryCallout(wgt)
             wgt.battery_low_start_time = nil
         end
 
-    -- Mode 2: No current sensor (% = 100) - announce voltage when critically low for 2+ seconds
-    elseif wgt.values.capa_percent >= 100 then
-        local vcel = wgt.values.vcel or 0
-        local voltage_threshold = 3.3
+        -- Mode 2: No current sensor (% = 100) - announce voltage when critically low for 2+ seconds
+    else
+        local vcel = wgt.values.vcel
+        local voltage_threshold = wgt.values.vcel_alarm_threshold()
 
-        if vcel > 0 and vcel < voltage_threshold then
+        if vcel ~= nil and vcel > 0 and vcel < voltage_threshold then
             wgt.battery_low_start_time = wgt.battery_low_start_time or now
             local low_duration = now - wgt.battery_low_start_time
 
@@ -355,57 +429,22 @@ function heliDashFunctions.updateBatteryCallout(wgt)
         else
             wgt.battery_low_start_time = nil
         end
-    else
-        wgt.battery_low_start_time = nil
     end
 
     -- Trigger callout if conditions met and enough time elapsed
     if should_announce and (now - wgt.last_battery_callout_time) >= callout_interval then
         playNumber(announce_value, announce_unit, announce_precision)
-        heliDashFunctions.log(log_msg)
+        helidash_functions.log(log_msg)
         if wgt.options.Haptic == 1 then playHaptic(20, 0, 0) end
         wgt.last_battery_callout_time = now
     end
 end
 
--- ============================================================================
--- CONNECTION & STATE MANAGEMENT
--- ============================================================================
-
--- Connection state tracking with debouncing
-function heliDashFunctions.updateConnectionState(wgt)
-    local current_rssi = getRSSI() > 0
-    if heliDashFunctions.simuMode then current_rssi = true end
-
-    local now = getTime() / 100
-
-    if current_rssi ~= wgt.rssi_state then
-        if current_rssi == true then
-            local was_connected = wgt.is_connected
-            wgt.rssi_state = true
-            wgt.is_connected = true
-            wgt.rssi_state_change_time = 0
-
-            if not was_connected then heliDashFunctions.resetTelemetryStats(wgt) end
-        else
-            if wgt.rssi_state_change_time == 0 then
-                wgt.rssi_state_change_time = now
-            elseif (now - wgt.rssi_state_change_time) >= wgt.rssi_debounce_threshold then
-                wgt.rssi_state = false
-                wgt.is_connected = false
-                wgt.rssi_state_change_time = 0
-                heliDashFunctions.log("Connection lost")
-            end
-        end
-    else
-        wgt.rssi_state_change_time = 0
-    end
-end
-
-function heliDashFunctions.resetTelemetryStats(wgt)
+function helidash_functions.reset_telemetry_stats(wgt)
     for i = 0, 99 do model.resetSensor(i) end
 
     model.resetTimer(wgt.options.Timer or 0)
+    reset_flight_time(wgt)
 
     -- Reset battery callout timer on disconnect
     wgt.last_battery_callout_time = nil
@@ -416,46 +455,48 @@ end
 -- REFRESH ORCHESTRATION
 -- ============================================================================
 
-function heliDashFunctions.refreshUINoConn(wgt)
-    heliDashFunctions.updateTXBatVoltage(wgt)
-    heliDashFunctions.updateCraftName(wgt)
-    heliDashFunctions.updateTimerCount(wgt)
+function helidash_functions.refresh_ui_no_conn(wgt)
+    helidash_functions.update_tx_bat_voltage(wgt)
+    helidash_functions.update_craft_name(wgt)
+    helidash_functions.update_timer_count(wgt)
 end
 
-function heliDashFunctions.refreshUI(wgt)
-    heliDashFunctions.updateHeadspeed(wgt)
-    heliDashFunctions.updateCell(wgt)
-    heliDashFunctions.updateVcel(wgt)
-    heliDashFunctions.updateCurr(wgt)
-    heliDashFunctions.updateMAUsed(wgt)
-    heliDashFunctions.updateGovState(wgt)
-    heliDashFunctions.updateProfiles(wgt)
-    heliDashFunctions.updateLinkQuality(wgt)
-    heliDashFunctions.updateTransmitterPower(wgt)
-    heliDashFunctions.updateArm(wgt)
-    heliDashFunctions.updateVbec(wgt)
-    heliDashFunctions.updateESCTemperature(wgt)
-    heliDashFunctions.updateArmingFlagsDisplay(wgt)
-    heliDashFunctions.updateMCUTemperature(wgt)
+function helidash_functions.refresh_ui(wgt)
+    helidash_functions.update_gov_state(wgt)
+    helidash_functions.update_headspeed(wgt)
+    helidash_functions.update_cell(wgt)
+    helidash_functions.update_vcel(wgt)
+    helidash_functions.update_curr(wgt)
+    helidash_functions.update_ma_used(wgt)
+    helidash_functions.update_profiles(wgt)
+    helidash_functions.update_link_quality(wgt)
+    helidash_functions.update_transmitter_power(wgt)
+    helidash_functions.update_arm(wgt)
+    helidash_functions.update_vbec(wgt)
+    helidash_functions.update_esc_temperature(wgt)
+    helidash_functions.update_mcu_temperature(wgt)
 
-    heliDashFunctions.refreshUINoConn(wgt)
+    helidash_functions.refresh_ui_no_conn(wgt)
 end
 
 -- Background refresh: lightweight updates (connection state + battery callouts)
-function heliDashFunctions.backgroundRefresh(wgt)
-    heliDashFunctions.updateConnectionState(wgt)
-    heliDashFunctions.updateBatteryCallout(wgt)
+function helidash_functions.background_refresh(wgt)
+    helidash_functions.update_battery_callout(wgt)
 end
 
 -- Main refresh: full telemetry updates (handles both connected and disconnected states)
-function heliDashFunctions.refresh(wgt)
-    heliDashFunctions.updateConnectionState(wgt)
-    if not wgt.is_connected then
-        heliDashFunctions.refreshUINoConn(wgt)
+function helidash_functions.refresh(wgt)
+    if helidash_functions.simu_mode then
+        helidash_functions.refresh_ui(wgt)
         return
     end
-    heliDashFunctions.refreshUI(wgt)
-    heliDashFunctions.updateBatteryCallout(wgt)
+
+    if not is_rf_connected(wgt) then
+        helidash_functions.refresh_ui_no_conn(wgt)
+        return
+    end
+    helidash_functions.refresh_ui(wgt)
+    helidash_functions.update_battery_callout(wgt)
 end
 
-return heliDashFunctions
+return helidash_functions

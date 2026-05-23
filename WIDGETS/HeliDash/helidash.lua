@@ -1,14 +1,22 @@
 local script_dir = "/WIDGETS/HeliDash/"
-local heliDashFunctions = loadScript(script_dir .. "helidashFunctions.lua")()
-local showDebugBorder = 0
--- Header font - will be set dynamically in build_ui based on available space
-local headerFont = SMLSIZE
+local helidash_functions = loadScript(script_dir .. "helidashFunctions.lua")()
+local helidash_values = loadScript(script_dir .. "helidashValues.lua")()
+local rf_service = loadScript(script_dir .. "helidashRf.lua")()
+local show_debug_border = 0
+-- Header font - set dynamically in the active UI builder based on available space
+local header_font = MIDSIZE
 local header_h = 0
-local headerFontColour = COLOR_THEME_SECONDARY1
+local card_gap = 2
+local card_padding = 3
+local compact_card_padding = math.max(2, card_padding - 1)
+local default_view = "flight"
+local STATS_VIEW_MODE_NEVER = 1
+local STATS_VIEW_MODE_DISARMED = 2
+local STATS_VIEW_MODE_DISCONNECTED = 3
+local DEFAULT_STATS_VIEW_MODE = STATS_VIEW_MODE_DISARMED
+local SIM_VIEW_SWITCH_INTERVAL = 5 * 100
 
--- Map font names (strings) to EdgeTx constants for use in labels
--- XLSIZE is conditionally available (added in EdgeTX with PR #7150)
-local FontConstants = {
+local FONT_CONSTANTS = {
     TINSIZE = TINSIZE,
     SMLSIZE = SMLSIZE,
     STDSIZE = STDSIZE,
@@ -17,229 +25,170 @@ local FontConstants = {
     XXLSIZE = XXLSIZE
 }
 
--- Safely add XLSIZE if available (EdgeTX 3.0+)
--- Use type check to ensure XLSIZE is properly defined as a number
-local hasXLSIZE = (type(XLSIZE) == "number")
-if hasXLSIZE then
-    FontConstants.XLSIZE = XLSIZE
+local xlsize = _G["XLSIZE"]
+local has_xlsize = (type(xlsize) == "number")
+if has_xlsize then
+    helidash_functions.log("XLSIZE font constant found with value: " .. tostring(xlsize))
+    FONT_CONSTANTS.XLSIZE = xlsize
 end
 
-
-local wgt = {is_connected = false, rssi_state = false, rssi_state_change_time = 0, rssi_debounce_threshold = 5}
-
-wgt.values = {
-    -- ========== LABELS (for future / possible translation support ) ==========
-    label_current = "Current",
-    label_fuel = "Fuel",
-    label_capacity = "Energy Used (mAh)",
-    label_esc_temp = "ESC Temperature",
-    label_battery_voltage = "Battery Voltage",
-    label_headspeed = "Headspeed",
-    label_bec_voltage = "BEC Voltage",
-    label_profile = "Profile",
-    label_rate = "Rate",
-    label_arm_state = "Arm State",
-    label_governor = "Governor State",
-    label_timer = "Timer",
-    label_tpwr = "TPWR+",
-    label_rqly = "RQly-",
-    label_mcu_temp_max = "Tmcu+",
-    label_armed = "Armed",
-    label_disarmed = "Disarmed",
-    label_flight_stats = "Flight Statistics",
-    label_tx_batt = "TX Battery",
-    label_min = "Min:",
-    label_max = "Max:",
-    label_esc_t = "ESC T",
-    label_cell_v = "CELL V",
-    label_bec_v = "BEC V",
-    label_curr = "CURR",
-    label_model = "Model: ",
-
-    -- ========== HEADSPEED ==========
-    headspeed = 0,
-    headspeed_formatted = function() return string.format("%.0f", (wgt.values.headspeed or 0)) end,
-
-    -- ========== BATTERY VOLTAGE ==========
-    vbat = 0,
-    vbat_formatted = function() return string.format("%.02f", wgt.values.vbat) end,
-
-    -- ========== CELL VOLTAGE ==========
-    vcel = 0,
-    vcel_min = 0,
-    vcel_max = 0,
-    cel_count = 0,
-    vcel_formatted = function() return string.format("%.02f", wgt.values.vcel) end,
-    vcel_min_formatted = function() return string.format("%.02f", wgt.values.vcel_min) end,
-    vcel_max_formatted = function() return string.format("%.02f", wgt.values.vcel_max) end,
-    cel_count_formatted = function() return string.format("(%dS)", wgt.values.cel_count) end,
-
-    -- ========== CURRENT / BATTERY USED ==========
-    curr = 0,
-    curr_min = 0,
-    curr_max = 0,
-    curr_min_formatted = function() return string.format("%.01f", wgt.values.curr_min) end,
-    curr_formatted = function() return string.format("%.01f", wgt.values.curr) end,
-    curr_max_formatted = function() return string.format("%.01f", wgt.values.curr_max) end,
-
-    -- ========== CAPACITY ==========
-    capa = 0,
-    capa_percent = 100,
-    capa_cell_color = COLOR_THEME_PRIMARY1,
-    capa_mid_text_color = COLOR_THEME_PRIMARY1,
-    capa_formatted = function() return string.format("%.0f", wgt.values.capa) end,
-    capa_percent_formatted = function() return string.format("%.0f%%", wgt.values.capa_percent) end,
-
-    -- ========== ESC TEMPERATURE ==========
-    esc_temp = 0,
-    esc_temp_min = 0,
-    esc_temp_max = 0,
-    esc_temp_formatted = function() return string.format("%.01f", wgt.values.esc_temp) end,
-    esc_temp_min_formatted = function() return string.format("%.01f", wgt.values.esc_temp_min) end,
-    esc_temp_max_formatted = function() return string.format("%.01f", wgt.values.esc_temp_max) end,
-
-    -- ========== CRAFT NAME ==========
-    craft_name = "NotDefined",
-    craft_name_formatted = function() return wgt.values.craft_name end,
-
-    -- ========== PROFILE & RATE ==========
-    profile_id = 0,
-    rate_id = 0,
-    profile_id_formatted = function() return tostring(wgt.values.profile_id) end,
-    rate_id_formatted = function() return tostring(wgt.values.rate_id) end,
-
-    -- ========== ARM STATE ==========
-    arm_state = false,
-    arm_disable_flags_list = nil,
-    arm_state_text = function() return wgt.values.arm_state and wgt.values.label_armed or wgt.values.label_disarmed end,
-    arm_state_color = function() return wgt.values.arm_state and DARKGREEN or COLOR_THEME_WARNING end,
-
-    -- ========== GOVERNOR ==========
-    gov_state = 0,
-    gov_state_formatted = function() return tostring(wgt.values.gov_state) end,
-
-    -- ========== BEC VOLTAGE ==========
-    vbec = 0,
-    vbec_min = 0,
-    vbec_max = 0,
-    vbec_formatted = function() return string.format("%.02f", wgt.values.vbec) end,
-    vbec_min_formatted = function() return string.format("%.02f", wgt.values.vbec_min) end,
-    vbec_max_formatted = function() return string.format("%.02f", wgt.values.vbec_max) end,
-
-    -- ========== TX VOLTS ==========
-    vtx_volts = 0,
-    vtx_volts_max = -1,
-    vtx_volts_min = -1,
-    vtx_volts_warn = -1,
-    vtx_volts_percent = 0,
-    vtx_volts_color = COLOR_THEME_PRIMARY1,
-    vtx_volts_formatted = function() return string.format("%s%%", wgt.values.vtx_volts_percent or 0) end,
-
-    -- ========== TIMER ==========
-    timer_str = "--:--",
-    timer_is_negative = false,
-    timer_color = function() return wgt.values.timer_is_negative and COLOR_THEME_WARNING or COLOR_THEME_PRIMARY1 end,
-    timer_str_formatted = function() return wgt.values.timer_str end,
-
-    -- ========== RF QUALITY ==========
-    rqly_min = 0,
-    rqly_formatted = function() return string.format("%s%%", wgt.values.rqly_min or 0) end,
-
-    -- ========== TX POWER ==========
-    tpwr_max = 0,
-    tpwr_formatted = function() return string.format("%smW", wgt.values.tpwr_max or 0) end,
-
-    -- ========== MCU TEMPERATURE MAX ==========
-    mcu_temp_max = 0,
-    mcu_temp_max_formatted = function() return string.format("%.0f°C", wgt.values.mcu_temp_max) end
-}
-
--- ============================================================================
--- UTILITY FUNCTIONS: Bar elements and font management
--- ============================================================================
-
-function buildBarElement(parentBox, wgt, params, getPercent, getPercentColor)
-    local box = parentBox:box({x = params.x, y = params.y})
-    box:rectangle({w = params.w, h = params.h, color = params.bg_color or GREY, filled = true})
-    box:rectangle({
-        filled = true,
-        size = function()
-            local percent = math.max(0, math.min(100, getPercent()))
-            return math.floor(percent / 100 * params.w), params.h
-        end,
-        color = function() return getPercentColor() or GREY end
-    })
-    return box
+local FONT_ORDER = { "XXLSIZE", "DBLSIZE", "MIDSIZE", "STDSIZE", "SMLSIZE", "TINSIZE" }
+if has_xlsize then
+    table.insert(FONT_ORDER, 2, "XLSIZE")
 end
 
--- Helper function to measure font dimensions (height and optionally width)
--- Optional: pass maxWidth and testString to also validate width constraint
-local function measureFont(fontConst, maxWidth, testString)
-    local testText = testString or "X"
-    local w, h = lcd.sizeText(testText, fontConst)
+local wgt = helidash_values.createWidget()
+
+--- Initialize the widget view state and fill in any missing defaults.
+local function init_view_state(widget)
+    widget.view = widget.view or { current = default_view, dirty = true, ever_armed = false }
+    widget.view.current = widget.view.current or default_view
+    if widget.view.ever_armed == nil then widget.view.ever_armed = false end
+    return widget.view
+end
+
+--- Return a valid statistics view mode, falling back to the default when needed.
+local function get_stats_view_mode(widget)
+    if widget.options.StatsViewMode ~= STATS_VIEW_MODE_NEVER and widget.options.StatsViewMode ~= STATS_VIEW_MODE_DISARMED and widget.options.StatsViewMode ~= STATS_VIEW_MODE_DISCONNECTED then
+        return DEFAULT_STATS_VIEW_MODE
+    end
+    return widget.options.StatsViewMode
+end
+
+--- Alternate between flight and stats views while running in the simulator.
+local function get_simulation_target_view()
+    local now = getTime() or 0
+    local phase = math.floor(now / SIM_VIEW_SWITCH_INTERVAL) % 2
+    if phase == 0 then
+        return "flight"
+    end
+    return "stats"
+end
+
+--- Decide which high-level view should be active for the current telemetry state.
+local function get_target_view(widget)
+    local view = init_view_state(widget)
+    local mode = get_stats_view_mode(widget)
+
+    if helidash_functions.simu_mode then
+        return get_simulation_target_view()
+    end
+
+    if widget.values.rf_connection_state == "armed" then
+        view.ever_armed = true
+        return "flight"
+    end
+    if mode == STATS_VIEW_MODE_NEVER or view.ever_armed ~= true then
+        return "flight"
+    end
+    if mode == STATS_VIEW_MODE_DISARMED then
+        return "stats"
+    end
+    if mode == STATS_VIEW_MODE_DISCONNECTED and widget.values.rf_connection_state == "disconnected" then
+        return "stats"
+    end
+    return "flight"
+end
+
+--- Switch the active view when telemetry state requires a different layout.
+local function sync_view_for_telemetry(widget)
+    local view = init_view_state(widget)
+    local target_view = get_target_view(widget)
+    if view.current == target_view then return false end
+
+    view.current = target_view
+    view.dirty = true
+    widget.layout_dirty = true
+    return true
+end
+
+--- Propagate telemetry state changes to services and update the selected view.
+local function handle_telemetry_state_change(widget, previous_state, new_state)
+    helidash_functions.on_telemetry_state_changed(widget, previous_state, new_state)
+    sync_view_for_telemetry(widget)
+end
+
+--- Prepare a widget instance once and attach shared services and callbacks.
+local function prepare_widget(widget)
+    if not widget then return nil end
+    if not widget.app_prepared then
+        init_view_state(widget)
+        rf_service.init(widget, handle_telemetry_state_change)
+        widget.sync_active_battery_capacity = rf_service.sync_active_battery_capacity
+        widget.app_prepared = true
+    end
+    return widget
+end
+
+-- ============================================================================
+-- UTILITY FUNCTIONS: Font management
+-- ============================================================================
+
+--- Measure font height and optionally reject it when a sample string is too wide.
+local function measure_font(font_const, max_w, test_string)
+    local test_text = test_string or "X"
+    local text_w, text_h = lcd.sizeText(test_text, font_const)
 
     -- If width constraint provided, return -1 if text is too wide
-    if maxWidth and w > maxWidth then
+    if max_w and text_w > max_w then
         return -1
     end
 
-    return h
+    return text_h
 end
 
--- Dynamic font selector: Choose appropriate font based on available dimensions
--- Returns the actual font constant (SMLSIZE, DBLSIZE, etc.), not a string
--- Allow reasonable tolerance for font height measurement variance
--- Optional: pass availableWidth, testString, and preferredOrder for width validation and font preference
-local function selectFont(availableHeight, availableWidth, testString, preferredOrder)
-    -- Build default order: include XLSIZE only if available
-    local defaultOrder = {"XXLSIZE", "DBLSIZE", "MIDSIZE", "STDSIZE", "SMLSIZE", "TINSIZE"}
-    if hasXLSIZE then
-        -- Insert XLSIZE between DBLSIZE and XXLSIZE for optimal scaling
-        table.insert(defaultOrder, 2, "XLSIZE")
-    end
-
-    preferredOrder = preferredOrder or defaultOrder
-    local FONT_TOLERANCE = 2 -- Allow up to 2 pixels of overshoot
-
-    for i = 1, #preferredOrder do
-        local fontName = preferredOrder[i]
-        local fontConst = FontConstants[fontName]
-        if fontConst then
-            local fontHeight = measureFont(fontConst, availableWidth, testString)
-            if fontHeight > 0 and fontHeight <= availableHeight + FONT_TOLERANCE then
-                return fontConst
+--- Pick the largest font that fits the available space and optional width sample.
+local function select_font(available_h, available_w, test_string, font_limit)
+    local start_index = 1
+    if type(font_limit) == "string" and font_limit ~= "" then
+        for i = 1, #FONT_ORDER do
+            if FONT_ORDER[i] == font_limit then
+                start_index = i
+                break
             end
         end
     end
 
-    local fallback = preferredOrder[#preferredOrder]
-    return FontConstants[fallback] or FontConstants.STDSIZE
+    local font_tolerance = 2 -- Allow up to 2 pixels of overshoot
+    local max_h = available_h + font_tolerance
+
+    for i = start_index, #FONT_ORDER do
+        local font_name = FONT_ORDER[i]
+        local font_const = FONT_CONSTANTS[font_name]
+        if font_const then
+            local font_h = measure_font(font_const, available_w, test_string)
+            if font_h > 0 and font_h <= max_h then
+                return font_const
+            end
+        end
+    end
+
+    local fallback = FONT_ORDER[#FONT_ORDER]
+    return FONT_CONSTANTS[fallback] or FONT_CONSTANTS.STDSIZE
 end
 
+--- Return the smallest font from a list of candidate font constants.
+local function pick_smallest_font(...)
+    local selected_font = nil
+    for i = 1, select("#", ...) do
+        local font_const = select(i, ...)
+        if font_const and (not selected_font or measure_font(font_const) < measure_font(selected_font)) then selected_font =
+            font_const end
+    end
+    return selected_font or STDSIZE
+end
 
+--- Choose one shared info-card font that fits all compared value columns.
+local function get_shared_info_font(info_card_h, first_w, second_w, third_w)
+    return pick_smallest_font(
+        select_font(info_card_h - header_h, first_w - 2 * card_padding, "-00:00"),
+        select_font(info_card_h - header_h, second_w - 2 * card_padding, "9999 (100%)"),
+        select_font(info_card_h - header_h, third_w - 2 * card_padding, "9999 (9)")
+    )
+end
 
--- ============================================================================
--- UI ELEMENT BUILDERS: Individual panel builders for each data display
--- ============================================================================
-
--- Element builder: Battery used
-local function buildBatteryUsedElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local bar_bottom_padding = 2
-
-    -- Layout: Fuel label (header_h), then 0%/mid%/100% row (header_h), then bar with bottom padding
-    local bar_y = 2 * header_h
-    local bar_h = c_h - bar_y - bar_bottom_padding
-    local bar_w = c_w - 2 * padding
-
-    -- Pick mid label font based on space available minus padding to bar
-    local available_for_mid = c_h - bar_h
-    local mid_label_font = selectFont(available_for_mid, nil, nil, {"DBLSIZE", "MIDSIZE", "SMLSIZE"})
-    local mid_label_h = measureFont(mid_label_font)
-
-    local label_y = header_h
-    local label_mid_y = bar_y - mid_label_h
-
+--- Build a reusable card rectangle and its child LVGL elements.
+local function build_card_element(container, x, y, c_w, c_h, children)
     container:build({
         {
             type = "rectangle",
@@ -247,795 +196,719 @@ local function buildBatteryUsedElement(container, wgt, x, y, c_w, c_h)
             y = y,
             w = c_w,
             h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - 2 * padding,
-                    h = header_h,
-                    text = wgt.values.label_fuel,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = label_y,
-                    w = bar_w / 3,
-                    h = header_h,
-                    text = "0%",
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = LEFT
-                }, {
-                    type = "label",
-                    x = padding + bar_w / 3,
-                    y = label_mid_y,
-                    w = bar_w / 3,
-                    h = mid_label_h,
-                    text = wgt.values.capa_percent_formatted,
-                    font = mid_label_font,
-                    color = function() return wgt.values.capa_mid_text_color end,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + 2 * bar_w / 3,
-                    y = label_y,
-                    w = bar_w / 3,
-                    h = header_h,
-                    text = "100%",
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = RIGHT
-                }
-            }
-        }
-    })
-    buildBarElement(container, wgt, {x = x + padding, y = y + bar_y, w = bar_w - 1, h = bar_h, bg_color = COLOR_THEME_PRIMARY1},
-                    function() return wgt.values.capa_percent end, function() return wgt.values.capa_cell_color end)
-end
-
--- Element builder: ESC Temperature
-local function buildESCTempElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_esc_temp,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.esc_temp_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
+            thickness = show_debug_border,
+            color = COLOR_THEME_SECONDARY2,
+            filled = false,
+            children = children
         }
     })
 end
 
--- Element builder: Battery Voltage
-local function buildBatteryVoltageElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
+--- Add a centered stacked field with a label above its value.
+local function add_stacked_field(children, x, y, c_w, row_padding, label_text, value_text, value_font, value_h)
+    local label_y = y + row_padding
+    children[#children + 1] = {
+        type = "label",
+        x = x,
+        y = label_y,
+        w = c_w,
+        h = header_h,
+        text = label_text,
+        font = header_font,
+        color = COLOR_THEME_SECONDARY1,
+        align = CENTER
+    }
+    children[#children + 1] = {
+        type = "label",
+        x = x,
+        y = label_y + header_h,
+        w = c_w,
+        h = value_h,
+        text = value_text,
+        font = value_font,
+        color = COLOR_THEME_PRIMARY1,
+        align = CENTER
+    }
+end
+
+--- Build the left flight panel with live telemetry values.
+local function build_flight_values_panel(container, wgt, x, y, c_w, c_h)
+    local padding = compact_card_padding
+    local row_gap = 1
+    local row_h = math.floor((c_h - 2 * padding - 4 * row_gap) / 5)
+    local used_h = row_h * 5 + 4 * row_gap
+    local start_y = padding + math.floor((c_h - used_h) / 2)
+    local label_w = math.floor(c_w * 0.55)
+    local value_x = padding + label_w
+    local value_w = c_w - value_x - padding
+    local rows = {
+        {
+            title = function() return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted() end,
+            value = wgt.values.vcel_formatted,
+            test = "4.20",
+            color = wgt.values.vcel_color
+        },
+        { title = wgt.values.label_headspeed,       value = wgt.values.headspeed_formatted, test = "2999",  color = COLOR_THEME_PRIMARY1 },
+        { title = wgt.values.label_current,         value = wgt.values.curr_formatted,      test = "999.9", color = COLOR_THEME_PRIMARY1 },
+        { title = wgt.values.label_battery_voltage, value = wgt.values.vbat_formatted,      test = "99.99", color = COLOR_THEME_PRIMARY1 },
+        { title = wgt.values.label_bec_voltage,     value = wgt.values.vbec_formatted,      test = "99.99", color = COLOR_THEME_PRIMARY1 }
+    }
+    local value_font = pick_smallest_font(
+        select_font(row_h - 2, value_w, "4.20"),
+        select_font(row_h - 2, value_w, "2999"),
+        select_font(row_h - 2, value_w, "999.9"),
+        select_font(row_h - 2, value_w, "99.99")
+    )
+    local value_font_h = measure_font(value_font)
+
+    for i = 1, 5 do
+        local current_row_h = row_h
+        local row_y = start_y + (i - 1) * (row_h + row_gap)
+        local value_y = row_y + math.floor((current_row_h - value_font_h) / 2)
+        local label_y = row_y + math.floor((current_row_h - header_h) / 2)
+
+        build_card_element(container, x, y + row_y, c_w, current_row_h, {
+            {
+                type = "label",
+                x = padding,
+                y = label_y - row_y,
+                w = label_w - padding,
+                h = header_h,
+                text = rows[i].title,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = LEFT
+            }, {
+            type = "label",
+            x = value_x,
+            y = value_y - row_y,
+            w = value_w,
+            h = value_font_h,
+            text = rows[i].value,
+            font = value_font,
+            color = rows[i].color,
+            align = RIGHT
+        }
+        })
+
+        if i < 5 then
+            container:hline({ x = x + padding, y = y + row_y + current_row_h, w = c_w - 2 * padding, h = 1, color =
+            COLOR_THEME_SECONDARY1 })
+        end
+    end
+end
+
+--- Build the center vertical battery gauge used on the flight view.
+local function build_vertical_fuel_gauge_element(container, wgt, x, y, c_w, c_h)
+    local warning_percent = wgt.options.FuelMin or 30
+    local side_inset = math.max(1, math.floor(c_w * 0.04))
+    local cap_h = math.max(5, math.floor(c_h * 0.06))
+    local cap_w = math.max(10, math.floor((c_w - 2 * side_inset) * 0.36))
+    local cap_x = x + math.floor((c_w - cap_w) / 2)
+    local body_x = x + card_padding + side_inset
+    local body_y = y + card_padding + cap_h
+    local body_w = c_w - 2 * (card_padding + side_inset)
+    local body_h = c_h - 2 * card_padding - cap_h
+    local body_rounding = math.max(3, math.floor(body_w * 0.10))
+    local cap_rounding = math.max(2, math.floor(cap_h * 0.45))
+    local cap_base_h = math.max(1, math.floor(cap_h * 0.35))
+    local inner_padding = math.max(3, math.floor(body_w * 0.10))
+    local segment_gap = math.max(1, math.floor(body_h * 0.01))
+    local inner_x = body_x + inner_padding
+    local inner_y = body_y + inner_padding
+    local inner_w = body_w - 2 * inner_padding
+    local inner_h = body_h - 2 * inner_padding
+    local segment_rounding = math.max(1, math.floor(inner_w * 0.10))
+    local segment_count = math.max(8, math.min(12, math.floor(inner_h / 12)))
+    local segment_h = math.floor((inner_h - (segment_count - 1) * segment_gap) / segment_count)
+    local segment_last_h = inner_h - segment_h * (segment_count - 1) - segment_gap * (segment_count - 1)
+    local value_font = select_font(math.floor(body_h * 0.16), body_w - 2 * inner_padding, "100%")
+    local value_font_h = measure_font(value_font)
+
+    local function get_segment_color(segment_threshold)
+        local current_percent = wgt.values.capa_percent or 0
+        if current_percent >= segment_threshold then
+            if current_percent <= warning_percent and segment_threshold <= warning_percent then
+                return COLOR_THEME_WARNING
+            end
+            return COLOR_THEME_SECONDARY2
+        end
+        return COLOR_THEME_SECONDARY1
+    end
+
     container:build({
         {
             type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
+            x = cap_x,
+            y = y + card_padding,
+            w = cap_w,
+            h = cap_h,
+            thickness = 1,
+            rounded = cap_rounding,
+            color = COLOR_THEME_SECONDARY1,
+            filled = true
+        }, {
+        type = "rectangle",
+        x = cap_x,
+        y = y + card_padding + cap_h - cap_base_h,
+        w = cap_w,
+        h = cap_base_h,
+        thickness = 0,
+        color = COLOR_THEME_SECONDARY1,
+        filled = true
+        }, {
+        type = "rectangle",
+        x = body_x,
+        y = body_y,
+        w = body_w,
+        h = body_h,
+        thickness = 1,
+        rounded = body_rounding,
+        color = COLOR_THEME_SECONDARY1,
+        filled = false
+    }
+    })
 
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_battery_voltage,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.vbat_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
+    for segmentIndex = 1, segment_count do
+        local top_index = segmentIndex - 1
+        local segment_item_h = segmentIndex == segment_count and segment_last_h or segment_h
+        local segment_threshold = ((segment_count - top_index) / segment_count) * 100
+        local segment_y = inner_y + top_index * (segment_h + segment_gap)
+        local segment_color = function() return get_segment_color(segment_threshold) end
+        local segment_flat_h = math.max(1, math.min(segment_rounding, segment_item_h))
+
+        container:build({
+            {
+                type = "rectangle",
+                x = inner_x,
+                y = segment_y,
+                w = inner_w,
+                h = segment_item_h,
+                thickness = 1,
+                rounded = (segmentIndex == 1 or segmentIndex == segment_count) and segment_rounding or 0,
+                color = segment_color,
+                filled = true
+            }, {
+                type = "rectangle",
+                x = inner_x,
+                y = segmentIndex == 1 and (segment_y + segment_item_h - segment_flat_h) or segment_y,
+                w = inner_w,
+                h = segment_flat_h,
+                thickness = 0,
+                color = segment_color,
+                filled = (segmentIndex == 1 or segmentIndex == segment_count)
             }
+        })
+    end
+
+    container:build({
+        {
+            type = "label",
+            x = body_x,
+            y = body_y + math.floor((body_h - value_font_h) / 2),
+            w = body_w,
+            h = value_font_h,
+            text = wgt.values.capa_percent_formatted,
+            font = value_font,
+            color = function() return wgt.values.capa_mid_text_color end,
+            align = CENTER
         }
     })
 end
 
--- Element builder: Timer
-local function buildTimerElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local availableWidth = c_w - 2 * padding
-    -- Use "-00:00" as test string (widest possible timer display with negative sign)
-    local valueFont = selectFont(availableHeight, availableWidth, "-00:00", nil)
-    heliDashFunctions.log("Selected timer font with height: " .. measureFont(valueFont))
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
+--- Build the right flight panel with timer, governor, and profile details.
+local function build_flight_status_panel(container, wgt, x, y, c_w, c_h)
+    local inner_w = c_w - 2 * card_padding
+    local timer_h = math.floor(c_h * 0.56)
+    local status_h = c_h - timer_h - 2 * card_padding
+    local row_h = math.floor(status_h / 2)
+    local bottom_row_h = status_h - row_h
+    local compact_field_w = math.floor(inner_w * 0.28)
+    local wide_field_w = inner_w - compact_field_w
+    local timer_font = select_font(timer_h - header_h, inner_w, "-00:00")
+    local timer_font_h = measure_font(timer_font)
+    local profile_value_font = select_font(row_h - header_h, compact_field_w, "9")
+    local profile_value_font_h = measure_font(profile_value_font)
+    local governor_value_font = select_font(row_h - header_h, wide_field_w, "Gov. Disabled", "MIDSIZE")
+    local governor_value_font_h = measure_font(governor_value_font)
+    local rate_value_font = select_font(bottom_row_h - header_h, compact_field_w, "9")
+    local rate_value_font_h = measure_font(rate_value_font)
+    local battery_profile_value_font = select_font(bottom_row_h - header_h, wide_field_w, "999mAh")
+    local battery_profile_value_font_h = measure_font(battery_profile_value_font)
+    local y_upper = card_padding + timer_h
+    local y_bottom = y_upper + row_h
+    local upper_row_value_h = math.max(profile_value_font_h, governor_value_font_h)
+    local upper_row_padding = math.max(0, math.floor((row_h - header_h - upper_row_value_h) / 2))
+    local lower_row_value_h = math.max(rate_value_font_h, battery_profile_value_font_h)
+    local lower_row_padding = math.max(0, math.floor((bottom_row_h - header_h - lower_row_value_h) / 2))
+    local compact_field_x = card_padding
+    local wide_field_x = card_padding + compact_field_w
+    local status_children = {
         {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_timer,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.timer_str_formatted,
-                    font = valueFont,
-                    color = wgt.values.timer_color
-                }
-            }
+            type = "label",
+            x = card_padding,
+            y = card_padding - 1,
+            w = inner_w,
+            h = header_h,
+            text = wgt.values.label_timer,
+            font = header_font,
+            color = COLOR_THEME_SECONDARY1,
+            align = LEFT
+        }, {
+            type = "label",
+            x = card_padding,
+            y = card_padding + header_h + math.floor((timer_h - header_h - timer_font_h) / 2),
+            w = inner_w,
+            h = timer_font_h,
+            text = wgt.values.timer_str_formatted,
+            font = timer_font,
+            color = wgt.values.timer_color,
+            align = CENTER
         }
-    })
+    }
+
+    add_stacked_field(status_children, compact_field_x, y_upper, compact_field_w, upper_row_padding,
+        wgt.values.label_profile, wgt.values.profile_id_formatted, profile_value_font, profile_value_font_h)
+    add_stacked_field(status_children, wide_field_x, y_upper, wide_field_w, upper_row_padding,
+        wgt.values.label_governor, wgt.values.gov_state_formatted, governor_value_font, governor_value_font_h)
+    add_stacked_field(status_children, compact_field_x, y_bottom, compact_field_w, lower_row_padding,
+        wgt.values.label_rate, wgt.values.rate_id_formatted, rate_value_font, rate_value_font_h)
+    add_stacked_field(status_children, wide_field_x, y_bottom, wide_field_w, lower_row_padding,
+        wgt.values.label_battery_profile, wgt.values.rf_battery_profile_compact_formatted,
+        battery_profile_value_font, battery_profile_value_font_h)
+
+    build_card_element(container, x, y, c_w, c_h, status_children)
+
+    container:hline({ x = x + card_padding, y = y + y_upper - 2, w = inner_w, h = 1, color = COLOR_THEME_SECONDARY1 })
+    container:hline({ x = x + card_padding, y = y + y_bottom - 2, w = inner_w, h = 1, color = COLOR_THEME_SECONDARY1 })
 end
 
--- Element builder: Capacity Used (mAh) value
-local function buildCapacityUsedValueElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local availableWidth = c_w - 2 * padding
-    local valueFont = selectFont(availableHeight, availableWidth, "9999")
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
+local function get_flight_statistics_rows(wgt)
+    return {
         {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_capacity,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.capa_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
+            label = function() return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted() end,
+            actual = wgt.values.vcel_formatted,
+            min = wgt.values.vcel_min_formatted,
+            max = wgt.values.vcel_max_formatted,
+            actualColor = wgt.values.vcel_actual_color,
+            minColor = wgt.values.vcel_min_color,
+            maxColor = wgt.values.vcel_max_color,
+            test = "4.20"
+        }, {
+        label = wgt.values.label_battery_voltage,
+        actual = wgt.values.vbat_formatted,
+        min = wgt.values.vbat_min_formatted,
+        max = wgt.values.vbat_max_formatted,
+        actualColor = COLOR_THEME_PRIMARY1,
+        minColor = COLOR_THEME_PRIMARY1,
+        maxColor = COLOR_THEME_PRIMARY1,
+        test = "99.99"
+    }, {
+        label = wgt.values.label_current,
+        actual = wgt.values.curr_formatted,
+        min = wgt.values.curr_min_formatted,
+        max = wgt.values.curr_max_formatted,
+        actualColor = COLOR_THEME_PRIMARY1,
+        minColor = COLOR_THEME_PRIMARY1,
+        maxColor = COLOR_THEME_PRIMARY1,
+        test = "999.9"
+    }, {
+        label = wgt.values.label_bec_voltage,
+        actual = wgt.values.vbec_formatted,
+        min = wgt.values.vbec_min_formatted,
+        max = wgt.values.vbec_max_formatted,
+        actualColor = COLOR_THEME_PRIMARY1,
+        minColor = COLOR_THEME_PRIMARY1,
+        maxColor = COLOR_THEME_PRIMARY1,
+        test = "99.99"
+    }, {
+        label = wgt.values.label_headspeed,
+        actual = wgt.values.headspeed_formatted,
+        min = wgt.values.headspeed_min_formatted,
+        max = wgt.values.headspeed_max_formatted,
+        actualColor = COLOR_THEME_PRIMARY1,
+        minColor = COLOR_THEME_PRIMARY1,
+        maxColor = COLOR_THEME_PRIMARY1,
+        test = "3200"
+    }
+    }
 end
 
--- Element builder: Flight Statistics
-local function buildFlightStatisticsElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local header_spacing = 2 -- Gap between header and column headers
-    local available_h = c_h - header_h - header_spacing
-    local row_h = math.floor(available_h / 3) -- 3 rows: column headers, Min, Max
-    local row_h_last = available_h - row_h * 2 -- Last row gets remaining pixels
-    local col_w = (c_w - 2 * padding) / 5 -- 5 columns: label + 4 values
-    local col_start_y = header_h + header_spacing
-    -- Dynamic font selection for min/max labels based on available row height
-    local minMaxFont = selectFont(row_h, nil, nil, {"STDSIZE", "SMLSIZE", "TINSIZE"})
+--- Calculate the statistics header layout for model name and RF totals.
+local function get_flight_statistics_top_layout(wgt, c_w, top_row_h, table_start_y)
+    local time_value_sample = "999:59:59"
+    local flights_value_sample = "9999"
+    local top_meta_pair_gap = 8
+    local top_meta_item_gap = 3
+    local total_time_label = wgt.values.label_total_flight_time .. ":"
+    local flights_label = wgt.values.label_total_flights .. ":"
+    local total_time_label_w = lcd.sizeText(total_time_label, header_font)
+    local flights_label_w = lcd.sizeText(flights_label, header_font)
+    local available_meta_w = math.max(1, c_w - 2 * card_padding)
+    local meta_fixed_w = total_time_label_w + flights_label_w + top_meta_pair_gap + top_meta_item_gap * 2
+    local meta_value_w = math.max(1, math.floor((available_meta_w - meta_fixed_w) / 2))
+    local top_meta_value_font = select_font(top_row_h - 2, meta_value_w, time_value_sample, "MIDSIZE")
+    local top_meta_value_font_h = measure_font(top_meta_value_font)
+    local total_time_value_w = lcd.sizeText(time_value_sample, top_meta_value_font)
+    local flights_value_w = lcd.sizeText(flights_value_sample, top_meta_value_font)
+    local total_time_block_w = total_time_label_w + top_meta_item_gap + total_time_value_w
+    local top_meta_cluster_w = total_time_block_w + top_meta_pair_gap + flights_label_w + top_meta_item_gap +
+    flights_value_w
+    local top_meta_x = math.max(card_padding, c_w - card_padding - top_meta_cluster_w)
+    local top_model_actual_w = math.max(1, top_meta_x - card_padding - 8)
+    local top_model_font = select_font(top_row_h - 2, top_model_actual_w, wgt.values.craft_name_formatted(), "DBLSIZE")
+    local top_model_font_h = measure_font(top_model_font)
+    local top_row_center_y = table_start_y + math.floor(top_row_h / 2)
 
+    return {
+        model_w = top_model_actual_w,
+        model_font = top_model_font,
+        model_font_h = top_model_font_h,
+        meta_value_font = top_meta_value_font,
+        meta_value_font_h = top_meta_value_font_h,
+        meta_label_y = top_row_center_y - math.floor(header_h / 2),
+        meta_value_y = top_row_center_y - math.floor(top_meta_value_font_h / 2),
+        total_time_label = total_time_label,
+        total_time_label_w = total_time_label_w,
+        total_time_value_w = total_time_value_w,
+        flights_label = flights_label,
+        flights_label_w = flights_label_w,
+        flights_value_w = flights_value_w,
+        meta_x = top_meta_x,
+        meta_last_x = top_meta_x + total_time_block_w + top_meta_pair_gap
+    }
+end
+
+--- Build the full statistics table and top metadata row.
+local function build_flight_statistics_element(container, wgt, x, y, c_w, c_h)
+    local stats_w = math.max(1, c_w - 1)
+    local stats_h = math.max(1, c_h - 1)
+    local label_w = math.floor((stats_w - 2 * card_padding) * 0.31)
+    local value_area_w = stats_w - 2 * card_padding - label_w
+    local value_col_w = math.floor(value_area_w / 3)
+    local value_last_col_w = value_area_w - value_col_w * 2
+    local top_row_h = math.max(header_h + 4, math.floor(stats_h * 0.15))
+    local header_row_h = math.max(header_h + 2, math.floor(stats_h * 0.12))
+    local header_gap_h = math.max(3, math.floor(stats_h * 0.02))
+    local rows = get_flight_statistics_rows(wgt)
+    local data_area_h = stats_h - top_row_h - header_gap_h - header_row_h
+    local row_h = math.floor(data_area_h / #rows)
+    local used_h = top_row_h + header_gap_h + header_row_h + row_h * #rows
+    local table_start_y = math.floor((stats_h - used_h) / 2)
+    local table_header_y = table_start_y + top_row_h + header_gap_h
+    local top = get_flight_statistics_top_layout(wgt, stats_w, top_row_h, table_start_y)
     container:build({
         {
             type = "rectangle",
             x = x,
             y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
+            w = stats_w,
+            h = stats_h,
+            thickness = show_debug_border,
             children = {
-                -- Header: left side
                 {
                     type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w / 2 - padding,
-                    h = header_h,
-                    text = wgt.values.label_flight_stats,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = LEFT
-                }, -- Header: right side - Model text (right-aligned) and craft name (left-aligned) using col_w spacing
-                {
-                    type = "label",
-                    x = padding + col_w * 2,
-                    y = 0,
-                    w = col_w,
-                    h = header_h,
-                    text = wgt.values.label_model,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = RIGHT
-                }, {
-                    type = "label",
-                    x = padding + col_w * 3,
-                    y = 0,
-                    w = col_w * 2,
-                    h = header_h,
+                    x = card_padding,
+                    y = table_start_y + math.floor((top_row_h - top.model_font_h) / 2),
+                    w = top.model_w,
+                    h = top.model_font_h,
                     text = wgt.values.craft_name_formatted,
-                    font = headerFont,
+                    font = top.model_font,
                     color = COLOR_THEME_PRIMARY1,
                     align = LEFT
-                }, -- Column headers (ESC T, Vcell-2S, BEC V, Curr)
-                {
-                    type = "label",
-                    x = padding + col_w * 1,
-                    y = col_start_y,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.label_esc_t,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = CENTER
                 }, {
-                    type = "label",
-                    x = padding + col_w * 2,
-                    y = col_start_y,
-                    w = col_w,
-                    h = row_h,
-                    text = function() return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted() end,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 3,
-                    y = col_start_y,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.label_bec_v,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 4,
-                    y = col_start_y,
-                    w = col_w - padding,
-                    h = row_h,
-                    text = wgt.values.label_curr,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = CENTER
-                }, -- Min row
-                {
-                    type = "label",
-                    x = padding,
-                    y = col_start_y + row_h,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.label_min,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = LEFT
-                }, {
-                    type = "label",
-                    x = padding + col_w * 1,
-                    y = col_start_y + row_h,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.esc_temp_min_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 2,
-                    y = col_start_y + row_h,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.vcel_min_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 3,
-                    y = col_start_y + row_h,
-                    w = col_w,
-                    h = row_h,
-                    text = wgt.values.vbec_min_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 4,
-                    y = col_start_y + row_h,
-                    w = col_w - padding,
-                    h = row_h,
-                    text = wgt.values.curr_min_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, -- Max row (uses row_h_last to consume remaining pixels)
-                {
-                    type = "label",
-                    x = padding,
-                    y = col_start_y + row_h * 2,
-                    w = col_w,
-                    h = row_h_last,
-                    text = wgt.values.label_max,
-                    font = headerFont,
-                    color = headerFontColour,
-                    align = LEFT
-                }, {
-                    type = "label",
-                    x = padding + col_w * 1,
-                    y = col_start_y + row_h * 2,
-                    w = col_w,
-                    h = row_h_last,
-                    text = wgt.values.esc_temp_max_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 2,
-                    y = col_start_y + row_h * 2,
-                    w = col_w,
-                    h = row_h_last,
-                    text = wgt.values.vcel_max_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 3,
-                    y = col_start_y + row_h * 2,
-                    w = col_w,
-                    h = row_h_last,
-                    text = wgt.values.vbec_max_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }, {
-                    type = "label",
-                    x = padding + col_w * 4,
-                    y = col_start_y + row_h * 2,
-                    w = col_w - padding,
-                    h = row_h_last,
-                    text = wgt.values.curr_max_formatted,
-                    font = minMaxFont,
-                    color = COLOR_THEME_PRIMARY1,
-                    align = CENTER
-                }
+                type = "label",
+                x = top.meta_x,
+                y = top.meta_label_y,
+                w = top.total_time_label_w,
+                h = header_h,
+                text = top.total_time_label,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = LEFT
+            }, {
+                type = "label",
+                x = top.meta_x + top.total_time_label_w + 2,
+                y = top.meta_value_y,
+                w = top.total_time_value_w,
+                h = top.meta_value_font_h,
+                text = wgt.values.rf_total_flight_time_display_formatted,
+                font = top.meta_value_font,
+                color = COLOR_THEME_PRIMARY1,
+                align = LEFT
+            }, {
+                type = "label",
+                x = top.meta_last_x,
+                y = top.meta_label_y,
+                w = top.flights_label_w,
+                h = header_h,
+                text = top.flights_label,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = LEFT
+            }, {
+                type = "label",
+                x = top.meta_last_x + top.flights_label_w + 2,
+                y = top.meta_value_y,
+                w = top.flights_value_w,
+                h = top.meta_value_font_h,
+                text = wgt.values.rf_total_flights_display_formatted,
+                font = top.meta_value_font,
+                color = COLOR_THEME_PRIMARY1,
+                align = LEFT
+            }, {
+                type = "label",
+                x = card_padding,
+                y = table_header_y + math.floor((header_row_h - header_h) / 2),
+                w = label_w - card_padding,
+                h = header_h,
+                text = wgt.values.rf_connection_state_formatted,
+                font = header_font,
+                color = wgt.values.rf_connection_state_color,
+                align = LEFT
+            }, {
+                type = "label",
+                x = card_padding + label_w,
+                y = table_header_y,
+                w = value_col_w,
+                h = header_row_h,
+                text = wgt.values.label_actual,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = CENTER
+            }, {
+                type = "label",
+                x = card_padding + label_w + value_col_w,
+                y = table_header_y,
+                w = value_col_w,
+                h = header_row_h,
+                text = wgt.values.label_min,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = CENTER
+            }, {
+                type = "label",
+                x = card_padding + label_w + value_col_w * 2,
+                y = table_header_y,
+                w = value_last_col_w,
+                h = header_row_h,
+                text = wgt.values.label_max,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = CENTER
+            }
             }
         }
     })
+
+    for i = 1, #rows do
+        local current_row_h = row_h
+        local row_y = y + table_header_y + header_row_h + (i - 1) * row_h
+        local row_value_font = select_font(current_row_h - 2, value_col_w, rows[i].test, "DBLSIZE")
+        local row_value_font_h = measure_font(row_value_font)
+        local row_label_y = math.floor((current_row_h - header_h) / 2)
+        local row_value_y = math.floor((current_row_h - row_value_font_h) / 2)
+
+        build_card_element(container, x, row_y, stats_w, current_row_h, {
+            {
+                type = "label",
+                x = card_padding,
+                y = row_label_y,
+                w = label_w - card_padding,
+                h = header_h,
+                text = rows[i].label,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = LEFT
+            }, {
+            type = "label",
+            x = card_padding + label_w,
+            y = row_value_y,
+            w = value_col_w,
+            h = row_value_font_h,
+            text = rows[i].actual,
+            font = row_value_font,
+            color = rows[i].actualColor,
+            align = CENTER
+        }, {
+            type = "label",
+            x = card_padding + label_w + value_col_w,
+            y = row_value_y,
+            w = value_col_w,
+            h = row_value_font_h,
+            text = rows[i].min,
+            font = row_value_font,
+            color = rows[i].minColor,
+            align = CENTER
+        }, {
+            type = "label",
+            x = card_padding + label_w + value_col_w * 2,
+            y = row_value_y,
+            w = value_last_col_w,
+            h = row_value_font_h,
+            text = rows[i].max,
+            font = row_value_font,
+            color = rows[i].maxColor,
+            align = CENTER
+        }
+        })
+
+        if i == 1 then
+            container:hline({ x = x + card_padding, y = y + table_header_y + header_row_h, w = stats_w - 2 * card_padding, h = 1, color =
+            COLOR_THEME_SECONDARY1 })
+        end
+        if i < #rows then
+            container:hline({ x = x + card_padding, y = row_y + current_row_h, w = stats_w - 2 * card_padding, h = 1, color =
+            COLOR_THEME_SECONDARY1 })
+        end
+    end
 end
-
--- Element builder: Headspeed
-local function buildHeadspeedElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_headspeed,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.headspeed_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-end
-
--- Element builder: BEC Voltage
-local function buildBECVoltageElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_bec_voltage,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.vbec_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-end
-
--- Element builder: Current Value (simple display, no bar)
-local function buildCurrentValueElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_current,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.curr_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-end
-
--- Element builder: Rate & Profile (side-by-side rectangles)
-local function buildRateProfileElement(container, wgt, x, y, c_w, c_h)
-    local rect_w = math.floor(c_w / 2)
-    local rect_h = c_h
-    local availableHeight = rect_h - header_h
-    local valueFont = selectFont(availableHeight)
-    local valueFontHeight = measureFont(valueFont)
-
-    -- Profile rectangle (left)
-    local padding = 2
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = rect_w,
-            h = rect_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = rect_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_profile,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = rect_h - valueFontHeight,
-                    w = rect_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.profile_id_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-
-    -- Rate rectangle (right)
-    container:build({
-        {
-            type = "rectangle",
-            x = x + rect_w,
-            y = y,
-            w = c_w - rect_w,
-            h = rect_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - rect_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_rate,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = rect_h - valueFontHeight,
-                    w = c_w - rect_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.rate_id_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-end
-
--- Element builder: Arm State
-local function buildArmStateElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight, nil, nil, {"MIDSIZE", "STDSIZE"})
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_arm_state,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.arm_state_text,
-                    font = valueFont,
-                    color = wgt.values.arm_state_color
-                }
-            }
-        }
-    })
-end
-
--- Element builder: Governor State
-local function buildGovernorElement(container, wgt, x, y, c_w, c_h)
-    local padding = 2
-    local availableHeight = c_h - header_h
-    local valueFont = selectFont(availableHeight, nil, nil, {"STDSIZE", "SMLSIZE", "TINSIZE"})
-    local valueFontHeight = measureFont(valueFont)
-    container:build({
-        {
-            type = "rectangle",
-            x = x,
-            y = y,
-            w = c_w,
-            h = c_h,
-            thickness = showDebugBorder,
-
-            children = {
-                {
-                    type = "label",
-                    x = padding,
-                    y = 0,
-                    w = c_w - padding,
-                    h = header_h,
-                    text = wgt.values.label_governor,
-                    font = headerFont,
-                    color = headerFontColour
-                }, {
-                    type = "label",
-                    x = padding,
-                    y = c_h - valueFontHeight,
-                    w = c_w - padding,
-                    h = valueFontHeight,
-                    text = wgt.values.gov_state_formatted,
-                    font = valueFont,
-                    color = COLOR_THEME_PRIMARY1
-                }
-            }
-        }
-    })
-end
-
 
 -- ============================================================================
 -- STATUS BAR FUNCTIONS: Dual-mode status bar (normal telemetry vs arming flags)
 -- ============================================================================
 
--- Status bar builder: Normal telemetry display (TPWR, RQly, Tmcu, TX Battery)
-local function buildStatusBarNormalElement(container, wgt, x, y, c_w, c_h)
-    local item_w = math.floor(c_w / 4)
+--- Build the normal status-bar labels for the active view.
+local function build_status_bar_normal_element(container, wgt, x, y, c_w, c_h)
     -- Calculate vertical centering offset
-    local headerFontHeight = measureFont(headerFont)
-    local y_offset = math.floor((c_h - headerFontHeight) / 2)
+    local header_font_h = measure_font(header_font)
+    local y_offset = math.floor((c_h - header_font_h) / 2)
     local labels = {}
+
+    if init_view_state(wgt).current == "flight" then
+        local model_w = math.floor(c_w * 0.50)
+        local tx_w = math.floor(c_w * 0.28)
+        local model_text_x = x + card_padding
+        local model_text_w = math.max(1, model_w - 2 * card_padding)
+
+        labels[1] = container:label({
+            x = model_text_x,
+            y = y + y_offset,
+            w = model_text_w,
+            h = header_font_h,
+            text = function() return string.format("%s%s", wgt.values.label_model, wgt.values.craft_name_formatted()) end,
+            font = header_font,
+            color = COLOR_THEME_PRIMARY1,
+            align = LEFT
+        })
+        labels[2] = container:label({
+            x = x,
+            y = y + y_offset,
+            w = c_w,
+            h = header_font_h,
+            text = wgt.values.arm_state_text,
+            font = header_font,
+            color = wgt.values.arm_state_color,
+            align = CENTER
+        })
+        labels[3] = container:label({
+            x = x + c_w - tx_w,
+            y = y + y_offset,
+            w = tx_w,
+            h = header_font_h,
+            text = function() return string.format("%s: %s", wgt.values.label_tx_batt, wgt.values.vtx_volts_formatted()) end,
+            font = header_font,
+            color = function() return wgt.values.vtx_volts_color or COLOR_THEME_PRIMARY1 end,
+            align = RIGHT
+        })
+
+        labels[4] = container:label({
+            x = x,
+            y = y,
+            w = 0,
+            h = 0,
+            text = "",
+            font = header_font,
+            color = COLOR_THEME_PRIMARY1,
+            align = RIGHT
+        })
+
+        return labels
+    end
+
+    local item_w = math.floor(c_w / 4)
 
     labels[1] = container:label({
         x = x,
         y = y + y_offset,
         w = item_w,
-        h = headerFontHeight,
+        h = header_font_h,
         text = function() return string.format("%s: %s", wgt.values.label_tpwr, wgt.values.tpwr_formatted()) end,
-        font = headerFont,
-        color = COLOR_THEME_PRIMARY1
+        font = header_font,
+        color = COLOR_THEME_PRIMARY1,
+        align = CENTER
     })
     labels[2] = container:label({
         x = x + item_w,
         y = y + y_offset,
         w = item_w,
-        h = headerFontHeight,
+        h = header_font_h,
         text = function() return string.format("%s: %s", wgt.values.label_rqly, wgt.values.rqly_formatted()) end,
-        font = headerFont,
-        color = COLOR_THEME_PRIMARY1
+        font = header_font,
+        color = COLOR_THEME_PRIMARY1,
+        align = CENTER
     })
     labels[3] = container:label({
         x = x + 2 * item_w,
         y = y + y_offset,
         w = item_w,
-        h = headerFontHeight,
-        text = function() return string.format("%s: %s", wgt.values.label_mcu_temp_max, wgt.values.mcu_temp_max_formatted()) end,
-        font = headerFont,
-        color = COLOR_THEME_PRIMARY1
+        h = header_font_h,
+        text = function() return string.format("%s: %s", wgt.values.label_mcu_temp_max,
+                wgt.values.mcu_temp_max_formatted()) end,
+        font = header_font,
+        color = COLOR_THEME_PRIMARY1,
+        align = CENTER
     })
     labels[4] = container:label({
         x = x + 3 * item_w,
         y = y + y_offset,
         w = item_w,
-        h = headerFontHeight,
+        h = header_font_h,
         text = function() return string.format("%s: %s", wgt.values.label_tx_batt, wgt.values.vtx_volts_formatted()) end,
-        font = headerFont,
-        color = function() return wgt.values.vtx_volts_color or COLOR_THEME_PRIMARY1 end
+        font = header_font,
+        color = function() return wgt.values.vtx_volts_color or COLOR_THEME_PRIMARY1 end,
+        align = CENTER
     })
 
     return labels
 end
 
--- Element builder: Status bar - Arming flags display (full width)
-local function buildStatusBarFlagsElement(container, wgt, x, y, c_w, c_h)
-    -- Calculate vertical centering offset
-    local headerFontHeight = measureFont(headerFont)
-    local y_offset = math.floor((c_h - headerFontHeight) / 2)
+--- Show either the normal status bar or the arming-flags warning state.
+local function update_status_bar_visibility(wgt, force_update)
+    if not wgt.status_bar_elements then return end
 
-    return container:label({
-        x = x,
-        y = y + y_offset,
-        w = c_w,
-        h = headerFontHeight,
-        text = function() return wgt.values.arm_flags_text_formatted or "Arming Disabled" end,
-        font = headerFont,
-        color = COLOR_THEME_WARNING
-    })
-end
-
-local function updateStatusBarVisibility(wgt, forceUpdate)
-    if not wgt.statusBarElements then return end
-
-    local hasFlags = wgt.values.arm_disable_flags_list and #wgt.values.arm_disable_flags_list > 0
+    local has_flags = wgt.values.arm_flags_visible()
 
     -- Only update if state changed (unless force update requested)
-    if not forceUpdate and hasFlags == wgt.statusBarState then return end
-    wgt.statusBarState = hasFlags
+    if not force_update and has_flags == wgt.status_bar_state then return end
+    wgt.status_bar_state = has_flags
 
-    if hasFlags then
-        wgt.statusBarElements.flags:show()
-        for i = 1, 4 do wgt.statusBarElements.normal[i]:hide() end
+    if has_flags then
+        wgt.status_bar_elements.flags:show()
+        for i = 1, #wgt.status_bar_elements.normal do wgt.status_bar_elements.normal[i]:hide() end
     else
-        for i = 1, 4 do wgt.statusBarElements.normal[i]:show() end
-        wgt.statusBarElements.flags:hide()
+        for i = 1, #wgt.status_bar_elements.normal do wgt.status_bar_elements.normal[i]:show() end
+        wgt.status_bar_elements.flags:hide()
     end
 end
 
--- Element builder: Status bar (main dispatcher - build both, swap visibility)
-local function buildStatusBarElement(container, wgt, x, y, c_w, c_h)
+--- Build both status-bar modes and cache the created element references.
+local function build_status_bar_element(container, wgt, x, y, c_w, c_h)
     -- Build both status bar modes and store references
-    if not wgt.statusBarElements then
-        wgt.statusBarElements = {}
-        wgt.statusBarElements.normal = buildStatusBarNormalElement(container, wgt, x, y, c_w, c_h)
-        wgt.statusBarElements.flags = buildStatusBarFlagsElement(container, wgt, x, y, c_w, c_h)
+    if not wgt.status_bar_elements then
+        local header_font_h = measure_font(header_font)
+        local y_offset = math.floor((c_h - header_font_h) / 2)
+        wgt.status_bar_elements = {}
+        wgt.status_bar_elements.normal = build_status_bar_normal_element(container, wgt, x, y, c_w, c_h)
+        wgt.status_bar_elements.flags = container:label({
+            x = x,
+            y = y + y_offset,
+            w = c_w,
+            h = header_font_h,
+            text = wgt.values.arm_flags_text_formatted,
+            font = header_font,
+            color = COLOR_THEME_WARNING
+        })
     end
 end
 
@@ -1044,123 +917,205 @@ end
 -- MAIN FUNCTIONS: Widget lifecycle (create, update, background, refresh)
 -- ============================================================================
 
--- Main UI builder: Creates the full widget layout with grid system
-local function build_ui(wgt, zone)
+--- Build the flight dashboard layout for the current widget zone.
+local function build_flight_ui(wgt, zone)
     local w = zone.w
     local h = zone.h
 
-    local line_h = 1 -- Separator line height
-    local h_status = math.floor(h * 0.075) -- Status bar height (7%)
+    local h_status = math.floor(h * 0.075)
+    local status_box_h = math.max(1, h_status - 2)
+    local outer_pad = 2
 
-    -- Dynamic header font based on available space (status bar is smallest constraint)
-    headerFont = selectFont(h_status, nil, nil, {"SMLSIZE", "TINSIZE"})
-    header_h = measureFont(headerFont)
+    header_font = select_font(status_box_h, nil, nil)
+    header_h = measure_font(header_font)
 
-    local h_top = math.floor((h - h_status - 2 * line_h) * 0.45) -- Top row height (~45%)
-    local h_mid = h - h_top - h_status - 2 * line_h -- Middle row gets remaining space (guaranteed to sum correctly)
+    local content_w = w - 2 * outer_pad
+    local content_h = h - h_status - card_gap - 2 * outer_pad
+    local y_status = outer_pad + content_h + card_gap
 
-    -- Row y positions (accounting for separator lines)
-    local y_top = 0
-    local y_mid = y_top + h_top + line_h
-    local y_status = y_mid + h_mid + line_h
+    local w_fuel = math.max(46, math.floor(content_w * 0.20))
+    local remaining_w = content_w - w_fuel - 2 * card_gap
+    local w_left = math.floor(remaining_w / 2)
+    local w_right = remaining_w - w_left
+    local x_fuel = outer_pad + w_left + card_gap
+    local x_right = x_fuel + w_fuel + card_gap
 
-    -- Top row cell heights (split exactly)
-    local h_cell = math.floor(h_top / 2)
-    local h_cell2 = h_top - h_cell
+    wgt.status_bar_elements = nil
+    wgt.status_bar_state = nil
 
-    -- Column x positions and widths (split exactly)
-    local w_col = math.floor(w / 4) - 2 -- Reduce slightly to prevent horizontal scroll bar
-    local x_col = {0, w_col, w_col * 2, w_col * 3}
-    local w_col_last = w - x_col[4] - 2
+    local main_panel = lvgl.rectangle({ x = 0, y = 0, w = w, h = h, color = COLOR_THEME_SECONDARY3, filled = (wgt.options.BGFilled == 1) })
 
-    -- Clear status bar elements reference since they'll be rebuilt
-    wgt.statusBarElements = nil
-    wgt.statusBarState = nil
+    build_flight_values_panel(main_panel, wgt, outer_pad, outer_pad, w_left, content_h)
+    build_vertical_fuel_gauge_element(main_panel, wgt, x_fuel, outer_pad, w_fuel, content_h)
+    build_flight_status_panel(main_panel, wgt, x_right, outer_pad, w_right, content_h)
 
-    -- Main container (holds all sections) and background if wanted
-    local bg_filled = (wgt.options.BGFilled == 1)
-    local pMain = lvgl.rectangle({x = 0, y = 0, w = w, h = h, color = COLOR_THEME_SECONDARY3, filled = bg_filled})
+    main_panel:hline({ y = y_status - 1, w = w - 3, h = 1, color = COLOR_THEME_SECONDARY1 })
 
-    -- ========== TOP ROW (50% height, 4 columns × 2 rows) ==========
-    local gridElements = {
-        {buildESCTempElement, buildBatteryVoltageElement}, {buildHeadspeedElement, buildBECVoltageElement},
-        {buildRateProfileElement, buildCurrentValueElement}, {buildGovernorElement, buildArmStateElement}
-    }
+    local status_bar_box = main_panel:box({ x = 0, y = y_status, w = w - 4, h = status_box_h })
+    wgt.status_bar_box = status_bar_box
+    wgt.status_bar_dims = { x = 0, y = 0, w = w - 4, h = status_box_h }
 
-    for col = 1, 4 do
-        local colX = x_col[col]
-        local col_w = (col == 4) and w_col_last or w_col
-
-        -- Top cell in column
-        gridElements[col][1](pMain, wgt, colX, y_top, col_w, h_cell)
-        -- Bottom cell in column
-        gridElements[col][2](pMain, wgt, colX, y_top + h_cell, col_w, h_cell2)
-    end
-
-    -- Separator line between top and middle rows
-    pMain:hline({y = y_mid - line_h, w = w - 3, h = line_h, color = COLOR_THEME_SECONDARY1})
-
-    -- ========== MIDDLE ROW (remaining height) ==========
-    -- Split middle row: top half = Flight Statistics, bottom half = Capacity, far right = Timer and energy used
-    -- Must align with top row grid: left 3 columns end at x_col[4], right column starts there
-    local h_top_half = math.floor(h_mid / 1.75)
-    local h_top_half2 = h_mid - h_top_half
-    local left_w = x_col[4] -- Left section width (aligns exactly with 3 top-row columns)
-    local right_x = x_col[4] -- Right section starts after vertical line
-    local right_w = w - right_x - 2 -- Remaining width for right section
-
-    -- Flight Statistics: top row (use same width as 3 top-row columns)
-    buildFlightStatisticsElement(pMain, wgt, 0, y_mid, left_w, h_top_half - 1)
-    -- Separator line between Flight Statistics and Capacity
-    pMain:hline({y = y_mid + h_top_half - 1, w = left_w, h = line_h, color = COLOR_THEME_SECONDARY1})
-    -- Capacity: bottom row
-    buildBatteryUsedElement(pMain, wgt, 0, y_mid + h_top_half, left_w, h_top_half2)
-    -- Vertical line on right side of flight statistics/capacity section
-    pMain:vline({x = left_w - 1, y = y_mid, h = h_top_half + line_h + h_top_half2, w = line_h, color = COLOR_THEME_SECONDARY1})
-    -- Far right: split into Timer (top) and Capacity Used value (bottom)
-    local right_h_top = math.floor(h_mid / 2)
-    local right_h_bottom = h_mid - right_h_top
-    -- Timer (top half) - use remaining width after left section
-    buildTimerElement(pMain, wgt, right_x, y_mid, right_w, right_h_top)
-    -- Energy Used (mAh) value (bottom half)
-    buildCapacityUsedValueElement(pMain, wgt, right_x, y_mid + right_h_top, right_w, right_h_bottom)
-
-    -- Separator line between middle and status bar rows
-    pMain:hline({y = y_status - line_h, w = w - 3, h = line_h, color = COLOR_THEME_SECONDARY1})
-
-    -- ========== STATUS BAR (7% height, full width) ==========
-    -- Create a separate box for status bar that can be completely rebuilt
-    local statusBarBox = pMain:box({x = 0, y = y_status, w = w - 4, h = h_status - 2})
-    wgt.statusBarBox = statusBarBox
-    wgt.statusBarDims = {x = 0, y = 0, w = w - 4, h = h_status - 2} -- Relative to the box
-
-    buildStatusBarElement(statusBarBox, wgt, 0, 0, w - 4, h_status - 2)
+    build_status_bar_element(status_bar_box, wgt, 0, 0, w - 4, status_box_h)
 end
 
+--- Build the statistics dashboard layout for the current widget zone.
+local function build_stats_ui(wgt, zone)
+    local w = zone.w
+    local h = zone.h
+    local stats_content_w = math.max(1, w - 1)
+    local info_content_w = math.max(1, stats_content_w - 1)
+
+    local line_h = 1
+    local h_status = math.floor(h * 0.075)
+    local status_box_h = math.max(1, h_status - 2)
+
+    header_font = select_font(status_box_h, nil, nil)
+    header_h = measure_font(header_font)
+
+    local content_h = h - h_status - 2 * line_h
+    local h_info = math.max(header_h * 3 + 8, math.floor(content_h * 0.16))
+    local h_mid = content_h - h_info
+
+    local y_info = h_mid + line_h
+    local y_status = y_info + h_info + line_h
+
+    wgt.status_bar_elements = nil
+    wgt.status_bar_state = nil
+
+    local main_panel = lvgl.rectangle({ x = 0, y = 0, w = w, h = h, color = COLOR_THEME_SECONDARY3, filled = (wgt.options.BGFilled == 1) })
+
+    build_flight_statistics_element(main_panel, wgt, 0, 0, stats_content_w, h_mid - line_h)
+
+    main_panel:hline({ y = y_info - line_h, w = w - 3, h = line_h, color = COLOR_THEME_SECONDARY1 })
+
+    local info_card_h = h_info
+    local equal_item_w = math.floor(info_content_w / 3)
+    local equal_item_last_w = info_content_w - equal_item_w * 2
+    local weighted_item_w = math.floor(info_content_w * 0.28)
+    local weighted_item_mid_w = math.floor(info_content_w * 0.28)
+    local weighted_item_last_w = info_content_w - weighted_item_w - weighted_item_mid_w
+
+    local equal_shared_font = get_shared_info_font(info_card_h, equal_item_w, equal_item_w, equal_item_last_w)
+    local weighted_shared_font = get_shared_info_font(info_card_h, weighted_item_w, weighted_item_mid_w,
+        weighted_item_last_w)
+
+    local shared_info_font = weighted_shared_font
+    local info_item_w = weighted_item_w
+    local info_item_mid_w = weighted_item_mid_w
+    local info_item_last_w = weighted_item_last_w
+    if measure_font(equal_shared_font) >= measure_font(weighted_shared_font) then
+        shared_info_font = equal_shared_font
+        info_item_w = equal_item_w
+        info_item_mid_w = equal_item_w
+        info_item_last_w = equal_item_last_w
+    end
+    local info_value_font_h = measure_font(shared_info_font)
+    local info_value_y = card_padding + header_h +
+    math.floor((info_card_h - header_h - 2 * card_padding - info_value_font_h) / 2)
+
+    local info_cards = {
+        {
+            x = 0,
+            w = info_item_w,
+            title = wgt.values.label_flight_time,
+            value = wgt.values.flight_time_str_formatted,
+            color = wgt.values.flight_time_color
+        }, {
+        x = info_item_w,
+        w = info_item_mid_w,
+        title = wgt.values.label_capacity_used_short,
+        value = wgt.values.battery_usage_summary_formatted,
+        color = COLOR_THEME_PRIMARY1
+    }, {
+        x = info_item_w + info_item_mid_w,
+        w = info_item_last_w,
+        title = wgt.values.label_battery_profile,
+        value = wgt.values.rf_battery_profile_display_formatted,
+        color = COLOR_THEME_PRIMARY1
+    }
+    }
+
+    for i = 1, #info_cards do
+        local card = info_cards[i]
+        build_card_element(main_panel, card.x, y_info, card.w, info_card_h, {
+            {
+                type = "label",
+                x = card_padding,
+                y = card_padding - 1,
+                w = card.w - 2 * card_padding,
+                h = header_h,
+                text = card.title,
+                font = header_font,
+                color = COLOR_THEME_SECONDARY1,
+                align = CENTER
+            }, {
+            type = "label",
+            x = card_padding,
+            y = info_value_y,
+            w = card.w - 2 * card_padding,
+            h = info_value_font_h,
+            text = card.value,
+            font = shared_info_font,
+            color = card.color,
+            align = CENTER
+        }
+        })
+    end
+
+    main_panel:hline({ y = y_status - line_h, w = w - 3, h = line_h, color = COLOR_THEME_SECONDARY1 })
+
+    local status_bar_box = main_panel:box({ x = 0, y = y_status, w = w - 4, h = status_box_h })
+    wgt.status_bar_box = status_bar_box
+    wgt.status_bar_dims = { x = 0, y = 0, w = w - 4, h = status_box_h }
+
+    build_status_bar_element(status_bar_box, wgt, 0, 0, w - 4, status_box_h)
+end
+
+--- Rebuild the widget UI for the active view and current options.
 local function update(wgt, options)
     if (wgt == nil) then return end
+    prepare_widget(wgt)
     wgt.options = options
     lvgl.clear()
 
-    build_ui(wgt, wgt.zone)
+    if init_view_state(wgt).current == "flight" then
+        build_flight_ui(wgt, wgt.zone)
+    else
+        build_stats_ui(wgt, wgt.zone)
+    end
+    init_view_state(wgt).dirty = false
+    wgt.layout_dirty = false
     -- Force status bar visibility update after UI rebuild
-    updateStatusBarVisibility(wgt, true)
+    update_status_bar_visibility(wgt, true)
     return wgt
 end
 
+--- Create the widget instance and perform the initial layout build.
 local function create(zone, options)
     wgt.zone = zone
     wgt.options = options
     return update(wgt, options)
 end
 
+--- Run background RF and telemetry work that should not rebuild the UI.
 local function background(wgt)
-    heliDashFunctions.backgroundRefresh(wgt)
+    if not wgt then return end
+    prepare_widget(wgt)
+    rf_service.background(wgt, handle_telemetry_state_change)
+    helidash_functions.background_refresh(wgt)
 end
 
-local function refresh(wgt, event, touchState)
-    heliDashFunctions.refresh(wgt)
-    updateStatusBarVisibility(wgt)
+--- Refresh live telemetry, switch views if needed, and rebuild only when dirty.
+local function refresh(wgt, event, touch_state)
+    if not wgt then return end
+    prepare_widget(wgt)
+    rf_service.background(wgt, handle_telemetry_state_change)
+    helidash_functions.refresh(wgt)
+    sync_view_for_telemetry(wgt)
+    if init_view_state(wgt).dirty == true then
+        return update(wgt, wgt.options)
+    end
+    update_status_bar_visibility(wgt)
 end
 
-return {create = create, update = update, background = background, refresh = refresh}
+return { create = create, update = update, background = background, refresh = refresh }
