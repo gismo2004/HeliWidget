@@ -45,10 +45,11 @@ set telemetry_sensors = 3,4,5,6,7,8,43,50,52,60,90,91,93,95,96,97,0,0,0,0,0,0,0,
 
 ## Widget Options
 - `Timer`: which EdgeTX timer to display
-- `BGFilled`: fill the widget background
-- `FuelMin`: battery warning threshold in percent
-- `CalloutInt`: battery callout interval in seconds
-- `Haptic`: enable haptic feedback on callouts
+- `BGFilled`: fill the widget background color
+- `FuelMin`: minimum battery percentage for low-battery warning
+- `CalloutInt`: battery callout interval in seconds, from 1 to 60
+- `Haptic`: vibrate on battery callouts
+- `StatsViewMode`: when to show the statistics page: `Never`, `On disarmed`, or `On disconnected`
 
 ## Preview
 ### Default EdgeTX Theme
