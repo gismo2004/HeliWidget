@@ -113,7 +113,6 @@ end
 
 function M.init(wgt, on_telemetry_state_changed)
     ensure_rf_state(wgt)
-    wgt.rf.available = rf2 ~= nil and rf2.registerWidget ~= nil and rf2.useApi ~= nil
     if not wgt.rf.callback_installed then
         wgt.onStateChanged = function(widget, new_state)
             M.on_state_changed(widget, new_state, on_telemetry_state_changed)
@@ -124,11 +123,37 @@ function M.init(wgt, on_telemetry_state_changed)
 end
 
 function M.background(wgt, on_telemetry_state_changed)
-    M.init(wgt, on_telemetry_state_changed)
-    if not wgt.rf.available or wgt.rf.is_registered then return end
+    local state = M.init(wgt, on_telemetry_state_changed)
+    local provider_available = rf2 ~= nil and type(rf2.registerWidget) == "function" and rf2.useApi ~= nil
 
-    rf2.registerWidget(wgt)
-    wgt.rf.is_registered = true
+    if provider_available ~= state.available then
+        state.available = provider_available
+        state.is_registered = false
+        state.msp_allowed = false
+
+        if provider_available then
+            state.last_state = nil
+        else
+            M.on_state_changed(wgt, "disconnected", on_telemetry_state_changed)
+            return
+        end
+    elseif not provider_available then
+        return
+    end
+
+    if not state.is_registered then
+        rf2.registerWidget(wgt)
+        state.is_registered = true
+    end
+
+    local current_state = rf2.rfToolState
+    if current_state == "ready" then
+        current_state = "connected"
+    end
+
+    if current_state == "armed" or current_state == "disarmed" or current_state == "connected" or current_state == "disconnected" then
+        M.on_state_changed(wgt, current_state, on_telemetry_state_changed)
+    end
 end
 
 M.sync_active_battery_capacity = sync_active_battery_capacity
