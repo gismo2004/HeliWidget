@@ -20,11 +20,52 @@ local function normalize_cell_voltage(raw_value, fallback)
     return raw_value
 end
 
+local function use_total_voltage_display(wgt)
+    return wgt.options and wgt.options.VoltageDisplay == 2
+end
+
+local function get_effective_cell_count(wgt)
+    local cell_count = wgt.values.cel_count or wgt.values.rf_battery_cell_count
+    if cell_count == nil or cell_count <= 0 then return nil end
+    return cell_count
+end
+
+local function get_cell_warning_threshold(wgt)
+    return normalize_cell_voltage(wgt.values.rf_cell_warning_voltage, DEFAULT_CELL_WARNING_VOLTAGE)
+end
+
+local function get_cell_alarm_threshold(wgt)
+    return normalize_cell_voltage(wgt.values.rf_cell_alarm_voltage, DEFAULT_CELL_ALARM_VOLTAGE)
+end
+
+local function get_display_voltage_threshold(wgt, cell_threshold)
+    if cell_threshold == nil then return nil end
+    if not use_total_voltage_display(wgt) then return cell_threshold end
+
+    local cell_count = get_effective_cell_count(wgt)
+    if cell_count == nil then return nil end
+    return cell_threshold * cell_count
+end
+
 local function get_cell_voltage_color_for_value(wgt, voltage)
     if voltage == nil or voltage <= 0 then return COLOR_THEME_PRIMARY1 end
 
-    local alarm_voltage = wgt.values.vcel_alarm_threshold()
-    local warning_voltage = math.max(alarm_voltage, wgt.values.vcel_warning_threshold())
+    local alarm_voltage = get_cell_alarm_threshold(wgt)
+    local warning_voltage = math.max(alarm_voltage, get_cell_warning_threshold(wgt))
+
+    if voltage <= alarm_voltage then return COLOR_THEME_WARNING end
+    if voltage <= warning_voltage then return YELLOW end
+    return COLOR_THEME_PRIMARY1
+end
+
+local function get_display_voltage_color_for_value(wgt, voltage)
+    if voltage == nil or voltage <= 0 then return COLOR_THEME_PRIMARY1 end
+
+    local alarm_voltage = get_display_voltage_threshold(wgt, get_cell_alarm_threshold(wgt))
+    local warning_voltage = get_display_voltage_threshold(wgt, get_cell_warning_threshold(wgt))
+    if alarm_voltage == nil or warning_voltage == nil then return COLOR_THEME_PRIMARY1 end
+
+    warning_voltage = math.max(alarm_voltage, warning_voltage)
 
     if voltage <= alarm_voltage then return COLOR_THEME_WARNING end
     if voltage <= warning_voltage then return YELLOW end
@@ -112,7 +153,7 @@ function M.createValues(wgt)
         label_fuel = "Fuel",
         label_capacity = "Energy Used (mAh)",
         label_esc_temp = "ESC Temperature",
-        label_battery_voltage = "Battery Voltage",
+        label_battery_voltage = "Batt Voltage",
         label_headspeed = "Headspeed",
         label_bec_voltage = "BEC Voltage",
         label_profile = "Profile",
@@ -200,10 +241,10 @@ function M.createValues(wgt)
             return string.format("(%dS)", wgt.values.cel_count)
         end,
         vcel_warning_threshold = function()
-            return normalize_cell_voltage(wgt.values.rf_cell_warning_voltage, DEFAULT_CELL_WARNING_VOLTAGE)
+            return get_cell_warning_threshold(wgt)
         end,
         vcel_alarm_threshold = function()
-            return normalize_cell_voltage(wgt.values.rf_cell_alarm_voltage, DEFAULT_CELL_ALARM_VOLTAGE)
+            return get_cell_alarm_threshold(wgt)
         end,
         vcel_actual_color = function()
             return get_cell_voltage_color_for_value(wgt, wgt.values.vcel)
@@ -216,6 +257,50 @@ function M.createValues(wgt)
         end,
         vcel_color = function()
             return wgt.values.vcel_actual_color()
+        end,
+
+        display_voltage_label = function()
+            if use_total_voltage_display(wgt) then
+                return wgt.values.label_battery_voltage .. " " .. wgt.values.cel_count_formatted()
+            end
+            return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted()
+        end,
+        display_voltage_formatted = function()
+            if use_total_voltage_display(wgt) then return wgt.values.vbat_formatted() end
+            return wgt.values.vcel_formatted()
+        end,
+        display_voltage_min_formatted = function()
+            if use_total_voltage_display(wgt) then return wgt.values.vbat_min_formatted() end
+            return wgt.values.vcel_min_formatted()
+        end,
+        display_voltage_max_formatted = function()
+            if use_total_voltage_display(wgt) then return wgt.values.vbat_max_formatted() end
+            return wgt.values.vcel_max_formatted()
+        end,
+        display_voltage_warning_threshold = function()
+            return get_display_voltage_threshold(wgt, get_cell_warning_threshold(wgt))
+        end,
+        display_voltage_alarm_threshold = function()
+            return get_display_voltage_threshold(wgt, get_cell_alarm_threshold(wgt))
+        end,
+        display_voltage_actual_color = function()
+            if use_total_voltage_display(wgt) then return get_display_voltage_color_for_value(wgt, wgt.values.vbat) end
+            return get_display_voltage_color_for_value(wgt, wgt.values.vcel)
+        end,
+        display_voltage_min_color = function()
+            if use_total_voltage_display(wgt) then return get_display_voltage_color_for_value(wgt, wgt.values.vbat_min) end
+            return get_display_voltage_color_for_value(wgt, wgt.values.vcel_min)
+        end,
+        display_voltage_max_color = function()
+            if use_total_voltage_display(wgt) then return get_display_voltage_color_for_value(wgt, wgt.values.vbat_max) end
+            return get_display_voltage_color_for_value(wgt, wgt.values.vcel_max)
+        end,
+        display_voltage_color = function()
+            return wgt.values.display_voltage_actual_color()
+        end,
+        display_voltage_test = function()
+            if use_total_voltage_display(wgt) then return "99.99" end
+            return "4.20"
         end,
 
         curr = nil,

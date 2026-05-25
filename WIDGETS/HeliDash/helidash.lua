@@ -243,21 +243,22 @@ local function build_flight_values_panel(container, wgt, x, y, c_w, c_h)
     local value_w = c_w - value_x - padding
     local rows = {
         {
-            title = function() return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted() end,
-            value = wgt.values.vcel_formatted,
-            test = "4.20",
-            color = wgt.values.vcel_color
+            title = wgt.values.display_voltage_label,
+            value = wgt.values.display_voltage_formatted,
+            test = wgt.values.display_voltage_test(),
+            color = wgt.values.display_voltage_color
         },
         { title = wgt.values.label_headspeed,       value = wgt.values.headspeed_formatted, test = "2999",  color = COLOR_THEME_PRIMARY1 },
         { title = wgt.values.label_current,         value = wgt.values.curr_formatted,      test = "999.9", color = COLOR_THEME_PRIMARY1 },
-        { title = wgt.values.label_battery_voltage, value = wgt.values.vbat_formatted,      test = "99.99", color = COLOR_THEME_PRIMARY1 },
+        { title = wgt.values.label_esc_temp,        value = wgt.values.esc_temp_formatted,  test = "120.0", color = COLOR_THEME_PRIMARY1 },
         { title = wgt.values.label_bec_voltage,     value = wgt.values.vbec_formatted,      test = "99.99", color = COLOR_THEME_PRIMARY1 }
     }
     local value_font = pick_smallest_font(
-        select_font(row_h - 2, value_w, "4.20"),
-        select_font(row_h - 2, value_w, "2999"),
-        select_font(row_h - 2, value_w, "999.9"),
-        select_font(row_h - 2, value_w, "99.99")
+        select_font(row_h - 2, value_w, rows[1].test),
+        select_font(row_h - 2, value_w, rows[2].test),
+        select_font(row_h - 2, value_w, rows[3].test),
+        select_font(row_h - 2, value_w, rows[4].test),
+        select_font(row_h - 2, value_w, rows[5].test)
     )
     local value_font_h = measure_font(value_font)
 
@@ -486,23 +487,23 @@ end
 local function get_flight_statistics_rows(wgt)
     return {
         {
-            label = function() return wgt.values.label_cell_v .. " " .. wgt.values.cel_count_formatted() end,
-            actual = wgt.values.vcel_formatted,
-            min = wgt.values.vcel_min_formatted,
-            max = wgt.values.vcel_max_formatted,
-            actualColor = wgt.values.vcel_actual_color,
-            minColor = wgt.values.vcel_min_color,
-            maxColor = wgt.values.vcel_max_color,
-            test = "4.20"
+            label = wgt.values.display_voltage_label,
+            actual = wgt.values.display_voltage_formatted,
+            min = wgt.values.display_voltage_min_formatted,
+            max = wgt.values.display_voltage_max_formatted,
+            actualColor = wgt.values.display_voltage_actual_color,
+            minColor = wgt.values.display_voltage_min_color,
+            maxColor = wgt.values.display_voltage_max_color,
+            test = wgt.values.display_voltage_test()
         }, {
-        label = wgt.values.label_battery_voltage,
-        actual = wgt.values.vbat_formatted,
-        min = wgt.values.vbat_min_formatted,
-        max = wgt.values.vbat_max_formatted,
+        label = wgt.values.label_headspeed,
+        actual = wgt.values.headspeed_formatted,
+        min = wgt.values.headspeed_min_formatted,
+        max = wgt.values.headspeed_max_formatted,
         actualColor = COLOR_THEME_PRIMARY1,
         minColor = COLOR_THEME_PRIMARY1,
         maxColor = COLOR_THEME_PRIMARY1,
-        test = "99.99"
+        test = "3200"
     }, {
         label = wgt.values.label_current,
         actual = wgt.values.curr_formatted,
@@ -513,6 +514,15 @@ local function get_flight_statistics_rows(wgt)
         maxColor = COLOR_THEME_PRIMARY1,
         test = "999.9"
     }, {
+        label = wgt.values.label_esc_temp,
+        actual = wgt.values.esc_temp_formatted,
+        min = wgt.values.esc_temp_min_formatted,
+        max = wgt.values.esc_temp_max_formatted,
+        actualColor = COLOR_THEME_PRIMARY1,
+        minColor = COLOR_THEME_PRIMARY1,
+        maxColor = COLOR_THEME_PRIMARY1,
+        test = "120.0"
+    }, {
         label = wgt.values.label_bec_voltage,
         actual = wgt.values.vbec_formatted,
         min = wgt.values.vbec_min_formatted,
@@ -521,15 +531,6 @@ local function get_flight_statistics_rows(wgt)
         minColor = COLOR_THEME_PRIMARY1,
         maxColor = COLOR_THEME_PRIMARY1,
         test = "99.99"
-    }, {
-        label = wgt.values.label_headspeed,
-        actual = wgt.values.headspeed_formatted,
-        min = wgt.values.headspeed_min_formatted,
-        max = wgt.values.headspeed_max_formatted,
-        actualColor = COLOR_THEME_PRIMARY1,
-        minColor = COLOR_THEME_PRIMARY1,
-        maxColor = COLOR_THEME_PRIMARY1,
-        test = "3200"
     }
     }
 end
