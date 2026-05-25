@@ -11,6 +11,7 @@ HeliDash is focused on a clean in-flight dashboard for helicopter-specific telem
 - Rotorflight-focused helicopter telemetry layout
 - Live flight dashboard plus flight statistics view
 - Headspeed, governor state, profile/rate, and battery-profile visibility
+- Selectable cell-voltage or battery-voltage display, with ESC temperature shown in both flight and statistics views
 - Battery and cell monitoring with audio/haptic low-battery callouts
 - EdgeTX simulator-friendly development and layout testing
 - RFTools-backed RF2 integration for richer Rotorflight data and flight statistics
@@ -22,6 +23,8 @@ HeliDash is focused on a clean in-flight dashboard for helicopter-specific telem
   - Setup instructions: [Rotorflight Lua Scripts](https://github.com/rotorflight/rotorflight-lua-scripts)
 
 RFTools is not only used for RF-backed data. HeliDash also relies on the RFTools/RF2 connection state to switch automatically between the Flight UI and the Flight Statistics UI.
+
+If RFTools becomes available after HeliDash is already running, HeliDash will attach to it on the next service cycle and pick up the current RF state.
 
 Without RFTools, HeliDash can still show basic direct telemetry, but RF-backed data, automatic state-driven view switching, and battery-profile integration will be limited or unavailable.
 
@@ -50,6 +53,7 @@ set telemetry_sensors = 3,4,5,6,7,8,43,50,52,60,90,91,93,95,96,97,0,0,0,0,0,0,0,
 - `CalloutInt`: battery callout interval in seconds, from 1 to 60
 - `Haptic`: vibrate on battery callouts
 - `StatsViewMode`: when to show the statistics page: `Never`, `On disarmed`, or `On disconnected`
+- `VoltageDisplay`: show voltage as `Cell voltage` or `Battery voltage`
 
 ## Preview
 ### Default EdgeTX Theme
