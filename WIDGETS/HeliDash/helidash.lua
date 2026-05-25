@@ -660,9 +660,9 @@ local function build_flight_statistics_element(container, wgt, x, y, c_w, c_h)
             }, {
                 type = "label",
                 x = card_padding,
-                y = table_header_y + math.floor((header_row_h - header_h) / 2),
+                y = table_header_y,
                 w = label_w - card_padding,
-                h = header_h,
+                h = header_row_h,
                 text = wgt.values.rf_connection_state_formatted,
                 font = header_font,
                 color = wgt.values.rf_connection_state_color,
