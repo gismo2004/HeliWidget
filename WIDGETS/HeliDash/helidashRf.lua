@@ -3,6 +3,7 @@ local M = {}
 local function ensure_rf_state(wgt)
     wgt.rf = wgt.rf or {
         available = false,
+        provider_ref = nil,
         is_registered = false,
         last_state = nil,
         msp_allowed = false,
@@ -125,9 +126,11 @@ end
 function M.background(wgt, on_telemetry_state_changed)
     local state = M.init(wgt, on_telemetry_state_changed)
     local provider_available = rf2 ~= nil and type(rf2.registerWidget) == "function" and rf2.useApi ~= nil
+    local provider_changed = state.provider_ref ~= rf2
 
-    if provider_available ~= state.available then
+    if provider_changed or provider_available ~= state.available then
         state.available = provider_available
+        state.provider_ref = rf2
         state.is_registered = false
         state.msp_allowed = false
 
