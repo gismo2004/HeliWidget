@@ -1,3 +1,8 @@
+--[[
+  Copyright (C) 2026 HeliDash Project
+  GPLv3 - https://www.gnu.org/licenses/gpl-3.0.en.html
+]] --
+
 local app_name = "HeliDash"
 local widg_dir = "/WIDGETS/HeliDash/"
 

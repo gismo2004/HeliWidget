@@ -1,3 +1,8 @@
+--[[
+  Copyright (C) 2026 HeliDash Project
+  GPLv3 - https://www.gnu.org/licenses/gpl-3.0.en.html
+]] --
+
 local script_dir = "/WIDGETS/HeliDash/"
 local helidash_functions = loadScript(script_dir .. "helidashFunctions.lua")()
 local helidash_values = loadScript(script_dir .. "helidashValues.lua")()

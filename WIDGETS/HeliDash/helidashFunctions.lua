@@ -1,3 +1,8 @@
+--[[
+  Copyright (C) 2026 HeliDash Project
+  GPLv3 - https://www.gnu.org/licenses/gpl-3.0.en.html
+]] --
+
 -- currently used RotorFlight telemetry values for this widget:
 
 -- 3 = Vbat (Main battery voltage)
